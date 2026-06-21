@@ -186,3 +186,105 @@ def plot_1d_profile(
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     return fig
+
+
+def plot_kinetics_power(
+    time: np.ndarray,
+    power_norm: np.ndarray,
+    title: str = "归一化功率 P(t)/P0 随时间变化",
+    log_scale: bool = False,
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(time, power_norm, "b-", linewidth=2, label="P(t)/P₀")
+    ax.set_xlabel("时间 t (s)", fontsize=12)
+    ax.set_ylabel("归一化功率 P(t)/P₀", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    if log_scale:
+        ax.set_yscale("log")
+    ax.axhline(y=1.0, color="r", linestyle="--", alpha=0.5, label="初始功率")
+    ax.legend(fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
+def plot_kinetics_reactivity(
+    time: np.ndarray,
+    reactivity: np.ndarray,
+    title: str = "反应性 ρ(t) 随时间变化",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(time, reactivity, "m-", linewidth=2, label="ρ(t)")
+    ax.set_xlabel("时间 t (s)", fontsize=12)
+    ax.set_ylabel("反应性 ρ", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    ax.axhline(y=0.0, color="k", linestyle="--", alpha=0.5)
+    fig.tight_layout()
+    return fig
+
+
+def plot_kinetics_precursors(
+    time: np.ndarray,
+    precursors: np.ndarray,
+    lambda_i: np.ndarray,
+    title: str = "各组缓发中子先驱核浓度随时间变化",
+    normalize: bool = True,
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = ["b", "g", "r", "c", "m", "y"]
+    n_groups = precursors.shape[1]
+    for i in range(n_groups):
+        c = precursors[:, i]
+        if normalize and c[0] > 0:
+            c = c / c[0]
+        label = f"组{i+1} (λ={lambda_i[i]:.3f} s⁻¹)"
+        ax.plot(time, c, color=colors[i % len(colors)], linewidth=1.5, label=label)
+    ax.set_xlabel("时间 t (s)", fontsize=12)
+    ax.set_ylabel("归一化先驱核浓度 Cᵢ(t)/Cᵢ(0)" if normalize else "先驱核浓度 Cᵢ(t)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=9, loc="best")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def plot_kinetics_all(
+    time: np.ndarray,
+    power_norm: np.ndarray,
+    reactivity: np.ndarray,
+    precursors: np.ndarray,
+    lambda_i: np.ndarray,
+) -> Figure:
+    fig, axes = plt.subplots(3, 1, figsize=(12, 14))
+
+    axes[0].plot(time, power_norm, "b-", linewidth=2)
+    axes[0].set_ylabel("P(t)/P₀", fontsize=12)
+    axes[0].set_title("归一化功率", fontsize=13)
+    axes[0].grid(True, alpha=0.3)
+    axes[0].axhline(y=1.0, color="r", linestyle="--", alpha=0.5)
+
+    axes[1].plot(time, reactivity, "m-", linewidth=2)
+    axes[1].set_ylabel("ρ(t)", fontsize=12)
+    axes[1].set_title("反应性", fontsize=13)
+    axes[1].grid(True, alpha=0.3)
+    axes[1].axhline(y=0.0, color="k", linestyle="--", alpha=0.5)
+
+    colors = ["b", "g", "r", "c", "m", "y"]
+    n_groups = precursors.shape[1]
+    for i in range(n_groups):
+        c = precursors[:, i]
+        if c[0] > 0:
+            c = c / c[0]
+        label = f"组{i+1} (λ={lambda_i[i]:.3f})"
+        axes[2].plot(time, c, color=colors[i % len(colors)], linewidth=1.5, label=label)
+    axes[2].set_xlabel("时间 t (s)", fontsize=12)
+    axes[2].set_ylabel("Cᵢ(t)/Cᵢ(0)", fontsize=12)
+    axes[2].set_title("归一化先驱核浓度", fontsize=13)
+    axes[2].legend(fontsize=8, loc="best")
+    axes[2].grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    return fig

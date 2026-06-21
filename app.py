@@ -35,7 +35,15 @@ from neutron_diffusion.visualization import (
     plot_1d_flux, plot_2d_flux, plot_2d_contour,
     plot_convergence, plot_power_distribution_1d,
     plot_power_distribution_2d, plot_sensitivity,
-    plot_control_rod_worth, plot_1d_profile
+    plot_control_rod_worth, plot_1d_profile,
+    plot_kinetics_power, plot_kinetics_reactivity,
+    plot_kinetics_precursors, plot_kinetics_all
+)
+from neutron_diffusion.kinetics import (
+    DelayedNeutronParams, KineticsResult,
+    get_u235_params, get_u238_params, get_pu239_params,
+    reactivity_step, reactivity_linear, reactivity_sinusoidal,
+    solve_point_kinetics_rk4, solve_point_kinetics_implicit_euler
 )
 
 st.set_page_config(page_title="核反应堆中子扩散方程求解器", layout="wide")
@@ -49,7 +57,8 @@ page = st.sidebar.radio(
         "二维反应堆临界计算",
         "控制棒价值计算",
         "参数敏感性分析",
-        "IAEA基准验证"
+        "IAEA基准验证",
+        "瞬态动力学模拟"
     ]
 )
 
@@ -670,6 +679,226 @@ elif page == "IAEA基准验证":
                                    bm_result.phi2, title="IAEA基准 - 热群通量 φ₂",
                                    cmap="viridis")
                 st.pyplot(fig2)
+
+elif page == "瞬态动力学模拟":
+    st.header("⚡ 瞬态动力学模拟 (点堆动力学方程)")
+
+    st.markdown("""
+    点堆动力学方程组:
+    - 功率方程: dP/dt = [(ρ(t)-β)/Λ]·P(t) + Σλᵢ·Cᵢ(t)
+    - 先驱核方程: dCᵢ/dt = (βᵢ/Λ)·P(t) - λᵢ·Cᵢ(t)  (i=1~6)
+    """)
+
+    with st.sidebar:
+        st.subheader("⏱️ 时间设置")
+        t_end = st.number_input("总模拟时间 (s)", 0.1, 1000.0, 10.0, 0.1, key="tk_tend")
+        dt_input = st.number_input("时间步长 (ms)", 0.01, 1000.0, 1.0, 0.01, key="tk_dt")
+        dt = dt_input / 1000.0
+
+        st.subheader("🧮 求解方法")
+        solver_method = st.radio("数值方法", ["RK4 (四阶龙格-库塔)", "隐式欧拉"], key="tk_solver")
+
+        st.subheader("⚛️ 核素选择")
+        nuc_preset = st.selectbox(
+            "缓发中子参数预设",
+            ["U-235 (默认)", "U-238", "Pu-239", "自定义"],
+            key="tk_nuc"
+        )
+
+        st.subheader("📐 中子代时间")
+        Lambda = st.number_input("Λ (中子代时间, s)", 1e-6, 1e-2, 1e-4, format="%.2e", key="tk_Lambda")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("🎛️ 反应性扰动输入")
+        reactivity_mode = st.radio(
+            "反应性输入方式",
+            ["阶跃插入", "线性爬升", "正弦振荡"],
+            horizontal=True,
+            key="tk_rmode"
+        )
+
+        if reactivity_mode == "阶跃插入":
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                rho_step = st.number_input(
+                    "阶跃反应性幅度 (Δk/k)",
+                    -0.01, 0.01, 0.001, 1e-5, format="%.5f", key="tk_rhostep"
+                )
+            with rc2:
+                t_insert = st.number_input(
+                    "插入时刻 (s)", 0.0, t_end, 1.0, 0.1, key="tk_tinsert"
+                )
+            rho_func = lambda t: reactivity_step(t, rho_step, t_insert)
+            st.info(f"t < {t_insert:.1f}s: ρ = 0;  t ≥ {t_insert:.1f}s: ρ = {rho_step:.5f}")
+
+        elif reactivity_mode == "线性爬升":
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            with rc1:
+                t_start = st.number_input("起始时刻 (s)", 0.0, t_end, 1.0, 0.1, key="tk_tstart")
+            with rc2:
+                t_end_ramp = st.number_input("结束时刻 (s)", 0.0, t_end, 5.0, 0.1, key="tk_tendramp")
+            with rc3:
+                rho_start = st.number_input(
+                    "起始反应性", -0.01, 0.01, 0.0, 1e-5, format="%.5f", key="tk_rhostart"
+                )
+            with rc4:
+                rho_end = st.number_input(
+                    "结束反应性", -0.01, 0.01, 0.002, 1e-5, format="%.5f", key="tk_rhoend"
+                )
+            if t_end_ramp <= t_start:
+                st.error("结束时刻必须大于起始时刻!")
+                rho_func = lambda t: 0.0
+            else:
+                rho_func = lambda t: reactivity_linear(t, t_start, t_end_ramp, rho_start, rho_end)
+
+        elif reactivity_mode == "正弦振荡":
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            with rc1:
+                amp = st.number_input(
+                    "振荡幅度", 0.0, 0.01, 0.001, 1e-5, format="%.5f", key="tk_amp"
+                )
+            with rc2:
+                freq = st.number_input(
+                    "频率 (Hz)", 0.001, 10.0, 0.1, 0.01, key="tk_freq"
+                )
+            with rc3:
+                phase = st.number_input(
+                    "相位 (rad)", 0.0, 2 * np.pi, 0.0, 0.1, key="tk_phase"
+                )
+            with rc4:
+                offset = st.number_input(
+                    "直流偏置", -0.01, 0.01, 0.0, 1e-5, format="%.5f", key="tk_offset"
+                )
+            rho_func = lambda t: reactivity_sinusoidal(t, amp, freq, phase, offset)
+
+    with col2:
+        st.subheader("🔬 缓发中子参数 (可修改)")
+        if nuc_preset == "U-235 (默认)":
+            default_params = get_u235_params()
+        elif nuc_preset == "U-238":
+            default_params = get_u238_params()
+        elif nuc_preset == "Pu-239":
+            default_params = get_pu239_params()
+        else:
+            default_params = get_u235_params()
+
+        beta_i_edit = np.zeros(6)
+        lambda_i_edit = np.zeros(6)
+
+        dn_table_data = []
+        for i in range(6):
+            cc1, cc2, cc3 = st.columns([1, 2, 2])
+            with cc1:
+                st.markdown(f"**组{i+1}**")
+            with cc2:
+                beta_i_edit[i] = st.number_input(
+                    f"β{i+1}", 0.0, 0.01, float(default_params.beta_i[i]),
+                    1e-6, format="%.6f", key=f"tk_b{i}"
+                )
+            with cc3:
+                lambda_i_edit[i] = st.number_input(
+                    f"λ{i+1} (s⁻¹)", 0.0, 10.0, float(default_params.lambda_i[i]),
+                    1e-4, format="%.4f", key=f"tk_l{i}"
+                )
+
+        dn_params = DelayedNeutronParams(beta_i=beta_i_edit, lambda_i=lambda_i_edit)
+        st.info(f"**总缓发中子份额 β = Σβᵢ = {dn_params.beta_total:.6f}**")
+
+    st.divider()
+
+    if st.button("🚀 开始瞬态动力学模拟", type="primary", use_container_width=True, key="tk_run"):
+        with st.spinner("正在求解点堆动力学方程..."):
+            if solver_method.startswith("RK4"):
+                result = solve_point_kinetics_rk4(
+                    rho_func, t_end=t_end, dt=dt,
+                    Lambda=Lambda, dn_params=dn_params, P0=1.0
+                )
+            else:
+                result = solve_point_kinetics_implicit_euler(
+                    rho_func, t_end=t_end, dt=dt,
+                    Lambda=Lambda, dn_params=dn_params, P0=1.0
+                )
+        st.session_state["kinetics_result"] = result
+
+    if "kinetics_result" in st.session_state:
+        result: KineticsResult = st.session_state["kinetics_result"]
+
+        st.subheader("📊 关键参数汇总")
+        kcol1, kcol2, kcol3, kcol4 = st.columns(4)
+        kcol1.metric("最大功率倍数", f"{result.max_power_multiplier:.4f}")
+        if result.steady_state_period is not None:
+            ss_period = result.steady_state_period
+            if abs(ss_period) > 1e4:
+                kcol2.metric("稳态周期", f"≈ ∞ (稳定)")
+            else:
+                kcol2.metric("稳态周期 (s)", f"{ss_period:.4f}")
+        else:
+            kcol2.metric("稳态周期", "N/A")
+        if result.asymptotic_period is not None:
+            asymp = result.asymptotic_period
+            if abs(asymp) > 1e4:
+                kcol3.metric("渐近周期", f"≈ ∞ (稳定)")
+            else:
+                kcol3.metric("渐近周期 (s)", f"{asymp:.4f}")
+        else:
+            kcol3.metric("渐近周期", "N/A")
+        kcol4.metric("时间步数", f"{result.n_steps}")
+
+        kcol5, kcol6, kcol7, kcol8 = st.columns(4)
+        kcol5.metric("中子代时间 Λ (s)", f"{result.Lambda:.2e}")
+        kcol6.metric("总缓发份额 β", f"{result.beta_total:.6f}")
+        kcol7.metric("β/Λ 比 (s⁻¹)", f"{result.beta_total / result.Lambda:.2e}")
+        max_rho_idx = int(np.argmax(np.abs(result.reactivity)))
+        kcol8.metric("最大|ρ(t)|", f"{result.reactivity[max_rho_idx]:.6f}")
+
+        st.divider()
+
+        show_log = st.checkbox("功率曲线使用对数坐标", value=False, key="tk_log")
+
+        tab_p, tab_r, tab_c, tab_all = st.tabs([
+            "📈 归一化功率 P(t)/P₀",
+            "📉 反应性 ρ(t)",
+            "⚛️ 先驱核浓度 Cᵢ(t)",
+            "📋 综合视图"
+        ])
+
+        with tab_p:
+            fig_p = plot_kinetics_power(
+                result.time, result.power_normalized,
+                log_scale=show_log,
+                title=f"归一化功率曲线 (方法: {solver_method})"
+            )
+            st.pyplot(fig_p)
+
+        with tab_r:
+            fig_r = plot_kinetics_reactivity(result.time, result.reactivity)
+            st.pyplot(fig_r)
+
+        with tab_c:
+            fig_c = plot_kinetics_precursors(
+                result.time, result.precursors, result.lambda_i,
+                normalize=True
+            )
+            st.pyplot(fig_c)
+
+        with tab_all:
+            fig_all = plot_kinetics_all(
+                result.time, result.power_normalized,
+                result.reactivity, result.precursors,
+                result.lambda_i
+            )
+            st.pyplot(fig_all)
+
+        st.subheader("📋 缓发中子参数表")
+        table_data = {
+            "组号": [f"组{i+1}" for i in range(6)],
+            "βᵢ (份额)": [f"{result.beta_i[i]:.6f}" for i in range(6)],
+            "λᵢ (s⁻¹)": [f"{result.lambda_i[i]:.4f}" for i in range(6)],
+            "半衰期 (s)": [f"{np.log(2)/result.lambda_i[i]:.4f}" if result.lambda_i[i] > 0 else "∞" for i in range(6)]
+        }
+        st.dataframe(table_data, use_container_width=True, hide_index=True)
 
 st.divider()
 st.caption("核反应堆中子扩散方程数值求解工具 | 基于 Streamlit + NumPy + SciPy + Matplotlib")
