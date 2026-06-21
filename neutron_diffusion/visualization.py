@@ -288,3 +288,117 @@ def plot_kinetics_all(
 
     fig.tight_layout()
     return fig
+
+
+def plot_keff_convergence_mc(
+    keff_history: List[float],
+    n_discard: int = 0,
+    keff_mean: Optional[float] = None,
+    keff_std: Optional[float] = None,
+    window: int = 5,
+    title: str = "蒙特卡洛 keff 收敛曲线",
+) -> Figure:
+    from .monte_carlo import moving_average
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    generations = list(range(1, len(keff_history) + 1))
+
+    ax.plot(generations, keff_history, "bo", markersize=4, alpha=0.6, label="每代 keff")
+
+    ma = moving_average(keff_history, window=window)
+    ax.plot(generations, ma, "r-", linewidth=2, label=f"移动平均 (窗口={window})")
+
+    if n_discard > 0 and n_discard < len(keff_history):
+        ax.axvline(x=n_discard + 0.5, color="k", linestyle="--", alpha=0.7,
+                   label=f"丢弃前 {n_discard} 代")
+        ax.axvspan(0.5, n_discard + 0.5, alpha=0.1, color="gray")
+
+    if keff_mean is not None:
+        ax.axhline(y=keff_mean, color="g", linestyle="--", linewidth=2,
+                   label=f"平均 keff = {keff_mean:.6f}")
+        if keff_std is not None:
+            ax.axhline(y=keff_mean + keff_std, color="g", linestyle=":", alpha=0.5)
+            ax.axhline(y=keff_mean - keff_std, color="g", linestyle=":", alpha=0.5,
+                       label=f"±σ = ±{keff_std:.6f}")
+
+    ax.set_xlabel("代际", fontsize=12)
+    ax.set_ylabel("keff", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def plot_flux_comparison(
+    x_mc: np.ndarray,
+    flux_mc: np.ndarray,
+    x_det: np.ndarray,
+    flux_det: np.ndarray,
+    title: str = "蒙特卡洛 vs 扩散方程 通量对比",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    flux_det_norm = flux_det.copy()
+    max_det = np.max(flux_det)
+    if max_det > 0:
+        flux_det_norm = flux_det / max_det
+
+    flux_mc_norm = flux_mc.copy()
+    max_mc = np.max(flux_mc)
+    if max_mc > 0:
+        flux_mc_norm = flux_mc / max_mc
+
+    ax.plot(x_det, flux_det_norm, "b-", linewidth=2.5, label="扩散方程 (确定性)")
+    ax.plot(x_mc, flux_mc_norm, "ro", markersize=5, alpha=0.7, label="蒙特卡洛")
+
+    ax.set_xlabel("x (cm)", fontsize=12)
+    ax.set_ylabel("归一化通量 φ", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def plot_relative_error(
+    x: np.ndarray,
+    rel_error: np.ndarray,
+    title: str = "通量相对误差分布",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.bar(x, rel_error, width=(x[1] - x[0]) * 0.8, color="orange", alpha=0.7, edgecolor="k")
+
+    mean_err = np.mean(rel_error)
+    max_err = np.max(rel_error)
+    ax.axhline(y=mean_err, color="r", linestyle="--", linewidth=2,
+               label=f"平均误差 = {mean_err:.2f}%")
+    ax.axhline(y=max_err, color="m", linestyle=":", linewidth=2,
+               label=f"最大误差 = {max_err:.2f}%")
+
+    ax.set_xlabel("x (cm)", fontsize=12)
+    ax.set_ylabel("相对误差 (%)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig
+
+
+def plot_collision_histogram(
+    x_centers: np.ndarray,
+    collision_count: np.ndarray,
+    title: str = "中子碰撞次数分布",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    bin_width = x_centers[1] - x_centers[0] if len(x_centers) > 1 else 1.0
+    ax.bar(x_centers, collision_count, width=bin_width * 0.8, color="steelblue", alpha=0.7, edgecolor="k")
+
+    ax.set_xlabel("x (cm)", fontsize=12)
+    ax.set_ylabel("碰撞次数", fontsize=12)
+    ax.set_title(f"{title}\n总碰撞次数: {int(np.sum(collision_count)):,}", fontsize=14)
+    ax.grid(True, alpha=0.3, axis="y")
+    fig.tight_layout()
+    return fig

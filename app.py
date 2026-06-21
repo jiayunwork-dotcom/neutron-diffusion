@@ -37,7 +37,12 @@ from neutron_diffusion.visualization import (
     plot_power_distribution_2d, plot_sensitivity,
     plot_control_rod_worth, plot_1d_profile,
     plot_kinetics_power, plot_kinetics_reactivity,
-    plot_kinetics_precursors, plot_kinetics_all
+    plot_kinetics_precursors, plot_kinetics_all,
+    plot_keff_convergence_mc, plot_flux_comparison,
+    plot_relative_error, plot_collision_histogram
+)
+from neutron_diffusion.monte_carlo import (
+    run_monte_carlo_1d, compute_flux_relative_error, MonteCarloResult
 )
 from neutron_diffusion.kinetics import (
     DelayedNeutronParams, KineticsResult,
@@ -58,7 +63,8 @@ page = st.sidebar.radio(
         "控制棒价值计算",
         "参数敏感性分析",
         "IAEA基准验证",
-        "瞬态动力学模拟"
+        "瞬态动力学模拟",
+        "蒙特卡洛模拟"
     ]
 )
 
@@ -899,6 +905,223 @@ elif page == "瞬态动力学模拟":
             "半衰期 (s)": [f"{np.log(2)/result.lambda_i[i]:.4f}" if result.lambda_i[i] > 0 else "∞" for i in range(6)]
         }
         st.dataframe(table_data, use_container_width=True, hide_index=True)
+
+elif page == "蒙特卡洛模拟":
+    st.header("🎲 一维蒙特卡洛中子输运模拟")
+
+    st.markdown("""
+    **蒙特卡洛输运原理:**
+    - 模拟单个中子从出生到死亡的完整生命周期
+    - 自由程长度按指数分布随机抽样: λ = -ln(ξ)/Σ_t
+    - 反应类型按截面比例随机判定: 吸收、散射、裂变
+    - 采用代际蒙特卡洛方法估计 keff
+    """)
+
+    with st.sidebar:
+        st.subheader("🎲 蒙特卡洛参数")
+        n_neutrons = st.slider("每代中子数", 100, 100000, 10000, 100, key="mc_n")
+        n_generations = st.slider("模拟代数", 10, 500, 100, 5, key="mc_g")
+        n_discard = st.slider("丢弃代数 (收敛前)", 0, 100, 20, 1, key="mc_d")
+        n_flux_bins = st.slider("通量统计网格数", 10, 200, 50, 5, key="mc_bins")
+        seed = st.number_input("随机数种子 (0=不设置)", 0, 999999, 42, 1, key="mc_seed")
+        ma_window = st.slider("移动平均窗口", 1, 20, 5, 1, key="mc_ma")
+
+        st.subheader("🏗️ 几何与材料 (单群)")
+        dx_mc = st.slider("扩散方程网格间距 (cm)", 0.1, 5.0, 1.0, 0.1, key="mc_dx")
+
+        bc_left_mc = st.selectbox("左边界", BOUNDARY_OPTIONS, index=0, key="mc_bc_l")
+        bc_right_mc = st.selectbox("右边界", BOUNDARY_OPTIONS, index=0, key="mc_bc_r")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("🏗️ 几何与材料定义")
+        n_regions_mc = st.number_input("材料区域数", 1, 10, 2, 1, key="n_regions_mc")
+        regions_mc = []
+        current_x_mc = 0.0
+
+        for i in range(n_regions_mc):
+            st.markdown(f"**区域 {i+1}**")
+            rcol1, rcol2 = st.columns(2)
+            with rcol1:
+                width = st.number_input(f"宽度 (cm) - 区域{i+1}", 1.0, 200.0, 20.0, 1.0, key=f"w_mc_{i}")
+            with rcol2:
+                mat_name = st.selectbox(f"材料 - 区域{i+1}", MATERIAL_OPTIONS,
+                                       index=i % len(MATERIAL_OPTIONS), key=f"m_mc_{i}")
+            x_start = current_x_mc
+            x_end = current_x_mc + width
+            regions_mc.append(Region1D(x_start, x_end, mat_name))
+            current_x_mc = x_end
+            st.info(f"x ∈ [{x_start:.1f}, {x_end:.1f}] cm: {mat_name}")
+
+    with col2:
+        st.subheader("🧮 确定性扩散方程参数")
+        k_tol_mc = st.number_input("keff收敛阈值", 1e-7, 1e-3, 1e-5, format="%.1e", key="mc_ktol")
+        flux_tol_mc = st.number_input("通量收敛阈值", 1e-6, 1e-2, 1e-4, format="%.1e", key="mc_ftol")
+        max_iter_mc = st.number_input("最大外迭代次数", 50, 2000, 500, 50, key="mc_maxiter")
+
+        run_mc = st.checkbox("同时运行确定性扩散方程对比", value=True, key="mc_compare")
+
+        seed_val = seed if seed > 0 else None
+
+        if st.button("🚀 开始蒙特卡洛模拟", type="primary", use_container_width=True, key="run_mc"):
+            bc_mc = BoundaryCondition(left=bc_left_mc, right=bc_right_mc)
+            geom_mc = Geometry1D(regions=regions_mc, dx=dx_mc, bc=bc_mc, material_mode="1g")
+
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            current_keff_text = st.empty()
+
+            def progress_cb(current_gen: int, total_gen: int, keff_gen: float):
+                progress = current_gen / total_gen
+                progress_bar.progress(progress)
+                status_text.text(f"正在模拟第 {current_gen}/{total_gen} 代...")
+                current_keff_text.metric("当前代 keff", f"{keff_gen:.6f}")
+
+            with st.spinner("蒙特卡洛模拟进行中，请稍候..."):
+                mc_result = run_monte_carlo_1d(
+                    geom_mc,
+                    n_neutrons_per_gen=n_neutrons,
+                    n_generations=n_generations,
+                    n_discard=n_discard,
+                    n_flux_bins=n_flux_bins,
+                    seed=seed_val,
+                    progress_callback=progress_cb,
+                )
+
+            progress_bar.progress(1.0)
+            status_text.text("✅ 蒙特卡洛模拟完成！")
+
+            st.session_state["mc_result"] = mc_result
+            st.session_state["geom_mc"] = geom_mc
+
+            if run_mc:
+                with st.spinner("正在运行确定性扩散方程..."):
+                    det_result = criticality_1d_1g(
+                        geom_mc,
+                        k_tol=k_tol_mc,
+                        flux_tol=flux_tol_mc,
+                        max_iter=max_iter_mc,
+                    )
+                st.session_state["det_result_mc"] = det_result
+
+    if "mc_result" in st.session_state:
+        mc_result: MonteCarloResult = st.session_state["mc_result"]
+        geom_mc = st.session_state["geom_mc"]
+
+        st.divider()
+
+        st.subheader("📊 蒙特卡洛结果统计")
+        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a.metric("🎯 平均 keff", f"{mc_result.keff_mean:.6f}")
+        col_b.metric("📏 标准差 σ", f"{mc_result.keff_std:.6f}")
+        col_c.metric("📐 95% 置信区间",
+                     f"[{mc_result.keff_ci_95[0]:.6f},\n {mc_result.keff_ci_95[1]:.6f}]")
+        col_d.metric("⚠️ 相对误差", f"{mc_result.keff_relative_error*100:.4f}%")
+
+        col_e, col_f, col_g, col_h = st.columns(4)
+        col_e.metric("🔢 有效代数", f"{mc_result.effective_generations}")
+        col_f.metric("⚛️ 总模拟中子数", f"{mc_result.total_neutrons_tracked:,}")
+        col_g.metric("💥 总碰撞次数", f"{mc_result.total_collisions:,}")
+        col_h.metric("☢️ 裂变源点数", f"{len(mc_result.fission_sites):,}")
+
+        if "det_result_mc" in st.session_state:
+            det_result = st.session_state["det_result_mc"]
+            st.divider()
+            st.subheader("⚖️ 蒙特卡洛 vs 扩散方程对比")
+            comp_col1, comp_col2, comp_col3 = st.columns(3)
+            comp_col1.metric("蒙特卡洛 keff", f"{mc_result.keff_mean:.6f}")
+            comp_col2.metric("扩散方程 keff", f"{det_result.keff:.6f}")
+            keff_diff_pcm = abs(mc_result.keff_mean - det_result.keff) / det_result.keff * 1e6
+            comp_col3.metric("keff 差异", f"{keff_diff_pcm:.1f} pcm")
+
+            if keff_diff_pcm < 100:
+                st.success(f"✅ keff 差异 < 100 pcm，两种方法一致性良好！")
+            elif keff_diff_pcm < 500:
+                st.warning(f"⚠️ keff 差异在 100~500 pcm 之间，可接受范围")
+            else:
+                st.error(f"❌ keff 差异 > 500 pcm，建议增加中子数或代数")
+
+        st.divider()
+
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📈 keff 收敛曲线",
+            "📊 通量对比",
+            "⚠️ 相对误差",
+            "💥 碰撞分布"
+        ])
+
+        with tab1:
+            fig_keff = plot_keff_convergence_mc(
+                mc_result.keff_history,
+                n_discard=mc_result.n_discard,
+                keff_mean=mc_result.keff_mean,
+                keff_std=mc_result.keff_std,
+                window=ma_window,
+                title="蒙特卡洛 keff 收敛曲线"
+            )
+            st.pyplot(fig_keff)
+
+            if "det_result_mc" in st.session_state:
+                det_result = st.session_state["det_result_mc"]
+                st.info(f"📌 扩散方程 keff = {det_result.keff:.6f} (参考值)")
+
+        with tab2:
+            if "det_result_mc" in st.session_state:
+                det_result = st.session_state["det_result_mc"]
+                x_nodes, x_centers, _ = geom_mc.build_mesh()
+
+                fig_flux = plot_flux_comparison(
+                    mc_result.flux_centers,
+                    mc_result.flux_mc,
+                    x_centers,
+                    det_result.phi,
+                    title="蒙特卡洛 vs 扩散方程 通量分布对比"
+                )
+                st.pyplot(fig_flux)
+            else:
+                fig_flux_mc = plot_1d_profile(
+                    mc_result.flux_centers,
+                    mc_result.flux_mc,
+                    title="蒙特卡洛中子通量分布",
+                    xlabel="x (cm)"
+                )
+                st.pyplot(fig_flux_mc)
+
+        with tab3:
+            if "det_result_mc" in st.session_state:
+                det_result = st.session_state["det_result_mc"]
+                x_nodes, x_centers, _ = geom_mc.build_mesh()
+
+                from scipy.interpolate import interp1d
+
+                det_interp = interp1d(x_centers, det_result.phi, kind='linear',
+                                     bounds_error=False, fill_value=0.0)
+                det_at_mc = det_interp(mc_result.flux_centers)
+
+                rel_error = compute_flux_relative_error(mc_result.flux_mc, det_at_mc)
+
+                fig_err = plot_relative_error(
+                    mc_result.flux_centers,
+                    rel_error,
+                    title="通量相对误差分布 (蒙特卡洛 vs 扩散方程)"
+                )
+                st.pyplot(fig_err)
+
+                err_col1, err_col2, err_col3 = st.columns(3)
+                err_col1.metric("平均相对误差", f"{np.mean(rel_error):.2f}%")
+                err_col2.metric("最大相对误差", f"{np.max(rel_error):.2f}%")
+                err_col3.metric("中位相对误差", f"{np.median(rel_error):.2f}%")
+            else:
+                st.info("请勾选'同时运行确定性扩散方程对比'以查看相对误差")
+
+        with tab4:
+            fig_col = plot_collision_histogram(
+                mc_result.flux_centers,
+                mc_result.collision_count,
+                title="中子碰撞次数空间分布"
+            )
+            st.pyplot(fig_col)
 
 st.divider()
 st.caption("核反应堆中子扩散方程数值求解工具 | 基于 Streamlit + NumPy + SciPy + Matplotlib")
