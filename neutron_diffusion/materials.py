@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 
 @dataclass
@@ -51,6 +51,23 @@ class Material2G:
         return self.Sigma_a2
 
 
+CUSTOM_MATERIALS_1G: Dict[str, Material1G] = {}
+CUSTOM_MATERIALS_2G: Dict[str, Material2G] = {}
+
+
+def register_custom_1g(name: str, mat: Material1G):
+    CUSTOM_MATERIALS_1G[name] = mat
+
+
+def register_custom_2g(name: str, mat: Material2G):
+    CUSTOM_MATERIALS_2G[name] = mat
+
+
+def clear_custom_materials():
+    CUSTOM_MATERIALS_1G.clear()
+    CUSTOM_MATERIALS_2G.clear()
+
+
 PRESET_MATERIALS_1G: Dict[str, Material1G] = {
     "UO2燃料(3%)": Material1G(
         name="UO2燃料(3%)",
@@ -59,6 +76,30 @@ PRESET_MATERIALS_1G: Dict[str, Material1G] = {
         nu=2.42,
         D=1.2,
         Sigma_s=0.4
+    ),
+    "UO2燃料(4%)": Material1G(
+        name="UO2燃料(4%)",
+        Sigma_a=0.11,
+        Sigma_f=0.075,
+        nu=2.42,
+        D=1.15,
+        Sigma_s=0.38
+    ),
+    "IAEA燃料A": Material1G(
+        name="IAEA燃料A",
+        Sigma_a=0.12,
+        Sigma_f=0.079,
+        nu=2.43,
+        D=0.72,
+        Sigma_s=0.35
+    ),
+    "IAEA燃料B": Material1G(
+        name="IAEA燃料B",
+        Sigma_a=0.13,
+        Sigma_f=0.065,
+        nu=2.43,
+        D=0.72,
+        Sigma_s=0.35
     ),
     "轻水慢化剂": Material1G(
         name="轻水慢化剂",
@@ -106,6 +147,42 @@ PRESET_MATERIALS_2G: Dict[str, Material2G] = {
         Sigma_f2=0.08,
         nu2=2.42,
         Sigma_s12=0.08
+    ),
+    "UO2燃料(4%)": Material2G(
+        name="UO2燃料(4%)",
+        D1=1.45,
+        Sigma_a1=0.011,
+        Sigma_f1=0.0065,
+        nu1=2.42,
+        D2=0.78,
+        Sigma_a2=0.135,
+        Sigma_f2=0.095,
+        nu2=2.42,
+        Sigma_s12=0.078
+    ),
+    "IAEA燃料A": Material2G(
+        name="IAEA燃料A",
+        D1=1.360,
+        Sigma_a1=0.0084,
+        Sigma_f1=0.0045,
+        nu1=2.75,
+        D2=0.480,
+        Sigma_a2=0.1200,
+        Sigma_f2=0.0815,
+        nu2=2.43,
+        Sigma_s12=0.0240
+    ),
+    "IAEA燃料B": Material2G(
+        name="IAEA燃料B",
+        D1=1.360,
+        Sigma_a1=0.0084,
+        Sigma_f1=0.0040,
+        nu1=2.75,
+        D2=0.480,
+        Sigma_a2=0.1300,
+        Sigma_f2=0.0650,
+        nu2=2.43,
+        Sigma_s12=0.0240
     ),
     "轻水慢化剂": Material2G(
         name="轻水慢化剂",
@@ -158,13 +235,37 @@ PRESET_MATERIALS_2G: Dict[str, Material2G] = {
 }
 
 
+def get_all_materials_1g() -> Dict[str, Material1G]:
+    result = dict(PRESET_MATERIALS_1G)
+    result.update(CUSTOM_MATERIALS_1G)
+    return result
+
+
+def get_all_materials_2g() -> Dict[str, Material2G]:
+    result = dict(PRESET_MATERIALS_2G)
+    result.update(CUSTOM_MATERIALS_2G)
+    return result
+
+
+def get_all_material_names_1g() -> List[str]:
+    return list(PRESET_MATERIALS_1G.keys()) + list(CUSTOM_MATERIALS_1G.keys())
+
+
+def get_all_material_names_2g() -> List[str]:
+    return list(PRESET_MATERIALS_2G.keys()) + list(CUSTOM_MATERIALS_2G.keys())
+
+
 def get_preset_1g(name: str) -> Material1G:
+    if name in CUSTOM_MATERIALS_1G:
+        return CUSTOM_MATERIALS_1G[name]
     if name in PRESET_MATERIALS_1G:
         return PRESET_MATERIALS_1G[name]
-    raise ValueError(f"未知材料预设: {name}")
+    raise ValueError(f"未知材料: {name}")
 
 
 def get_preset_2g(name: str) -> Material2G:
+    if name in CUSTOM_MATERIALS_2G:
+        return CUSTOM_MATERIALS_2G[name]
     if name in PRESET_MATERIALS_2G:
         return PRESET_MATERIALS_2G[name]
-    raise ValueError(f"未知材料预设: {name}")
+    raise ValueError(f"未知材料: {name}")

@@ -92,7 +92,7 @@ def solve_2d_diffusion_2g_sor(
     geom: Geometry2D,
     fission_source_1: np.ndarray,
     fission_source_2: np.ndarray,
-    omega: float = 1.5,
+    omega: float = 1.0,
     tol: float = 1e-6,
     max_iter: int = 10000,
     initial_guess1: Optional[np.ndarray] = None,
@@ -169,7 +169,8 @@ def solve_2d_diffusion_2g_sor(
                         diag += coeff
                     elif geom.bc.left == "reflective":
                         coeff = D_x[j, 0] / (dx ** 2)
-                        val += coeff * phi[j, i]
+                        mirror_idx = i + 1 if i + 1 < nx else i
+                        val += coeff * phi[j, mirror_idx]
                         diag += coeff
 
                 if i < nx - 1:
@@ -185,7 +186,8 @@ def solve_2d_diffusion_2g_sor(
                         diag += coeff
                     elif geom.bc.right == "reflective":
                         coeff = D_x[j, nx] / (dx ** 2)
-                        val += coeff * phi[j, i]
+                        mirror_idx = i - 1 if i - 1 >= 0 else i
+                        val += coeff * phi[j, mirror_idx]
                         diag += coeff
 
                 if j > 0:
@@ -201,7 +203,8 @@ def solve_2d_diffusion_2g_sor(
                         diag += coeff
                     elif geom.bc.bottom == "reflective":
                         coeff = D_y[0, i] / (dy ** 2)
-                        val += coeff * phi[j, i]
+                        mirror_idx = j + 1 if j + 1 < ny else j
+                        val += coeff * phi[mirror_idx, i]
                         diag += coeff
 
                 if j < ny - 1:
@@ -217,7 +220,8 @@ def solve_2d_diffusion_2g_sor(
                         diag += coeff
                     elif geom.bc.top == "reflective":
                         coeff = D_y[ny, i] / (dy ** 2)
-                        val += coeff * phi[j, i]
+                        mirror_idx = j - 1 if j - 1 >= 0 else j
+                        val += coeff * phi[mirror_idx, i]
                         diag += coeff
 
                 updated = val / diag

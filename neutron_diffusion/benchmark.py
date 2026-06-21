@@ -11,13 +11,10 @@ IAEA_2G_LWR_KEFF_REF = 1.02910
 def build_iaea_benchmark_geometry(dx: float = 1.0, dy: float = 1.0) -> Geometry2D:
     size = 170.0
     regions = []
-    fuel1_start, fuel1_end = 0.0, 100.0
-    fuel2_start, fuel2_end = 100.0, 170.0
-    reflector_start, reflector_end = 0.0, 170.0
 
-    regions.append(Region2D(0.0, 100.0, 0.0, 100.0, "UO2燃料(3%)"))
-    regions.append(Region2D(100.0, 170.0, 0.0, 100.0, "UO2燃料(3%)"))
-    regions.append(Region2D(0.0, 100.0, 100.0, 170.0, "UO2燃料(3%)"))
+    regions.append(Region2D(0.0, 100.0, 0.0, 100.0, "IAEA燃料A"))
+    regions.append(Region2D(100.0, 170.0, 0.0, 100.0, "IAEA燃料B"))
+    regions.append(Region2D(0.0, 100.0, 100.0, 170.0, "IAEA燃料B"))
     regions.append(Region2D(100.0, 170.0, 100.0, 170.0, "石墨反射层"))
 
     bc = BoundaryCondition(
@@ -50,9 +47,9 @@ class BenchmarkResult:
 
 
 def run_iaea_benchmark(
-    dx: float = 1.0,
-    dy: float = 1.0,
-    omega: float = 1.5,
+    dx: float = 5.0,
+    dy: float = 5.0,
+    omega: float = 1.0,
     inner_tol: float = 1e-6,
     inner_max_iter: int = 2000,
     k_tol: float = 1e-5,

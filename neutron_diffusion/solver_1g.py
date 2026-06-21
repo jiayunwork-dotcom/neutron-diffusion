@@ -78,7 +78,7 @@ def solve_1d_diffusion_1g(
 def solve_2d_diffusion_1g_sor(
     geom: Geometry2D,
     source: np.ndarray,
-    omega: float = 1.5,
+    omega: float = 1.0,
     tol: float = 1e-6,
     max_iter: int = 10000,
     initial_guess: Optional[np.ndarray] = None,
@@ -138,7 +138,8 @@ def solve_2d_diffusion_1g_sor(
                         diag += coeff
                     elif geom.bc.left == "reflective":
                         coeff = D_x[j, 0] / (dx ** 2)
-                        phi_new += coeff * phi[j, i]
+                        mirror_idx = i + 1 if i + 1 < nx else i
+                        phi_new += coeff * phi[j, mirror_idx]
                         diag += coeff
 
                 if i < nx - 1:
@@ -154,7 +155,8 @@ def solve_2d_diffusion_1g_sor(
                         diag += coeff
                     elif geom.bc.right == "reflective":
                         coeff = D_x[j, nx] / (dx ** 2)
-                        phi_new += coeff * phi[j, i]
+                        mirror_idx = i - 1 if i - 1 >= 0 else i
+                        phi_new += coeff * phi[j, mirror_idx]
                         diag += coeff
 
                 if j > 0:
@@ -170,7 +172,8 @@ def solve_2d_diffusion_1g_sor(
                         diag += coeff
                     elif geom.bc.bottom == "reflective":
                         coeff = D_y[0, i] / (dy ** 2)
-                        phi_new += coeff * phi[j, i]
+                        mirror_idx = j + 1 if j + 1 < ny else j
+                        phi_new += coeff * phi[mirror_idx, i]
                         diag += coeff
 
                 if j < ny - 1:
@@ -186,7 +189,8 @@ def solve_2d_diffusion_1g_sor(
                         diag += coeff
                     elif geom.bc.top == "reflective":
                         coeff = D_y[ny, i] / (dy ** 2)
-                        phi_new += coeff * phi[j, i]
+                        mirror_idx = j - 1 if j - 1 >= 0 else j
+                        phi_new += coeff * phi[mirror_idx, i]
                         diag += coeff
 
                 phi_new /= diag

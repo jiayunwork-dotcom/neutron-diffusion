@@ -28,7 +28,7 @@ def control_rod_1d(
     geom: Geometry1D,
     rod_region: Tuple[float, float],
     ngroups: str = "1g",
-    omega: float = 1.5,
+    omega: float = 1.0,
 ) -> ControlRodResult:
     x_start, x_end = rod_region
 
@@ -70,7 +70,7 @@ def control_rod_2d(
     geom: Geometry2D,
     rod_regions_list: List[Tuple[float, float, float, float]],
     ngroups: str = "1g",
-    omega: float = 1.5,
+    omega: float = 1.0,
 ) -> ControlRodResult:
     if ngroups == "1g":
         result_out = criticality_2d_1g(geom, omega=omega)

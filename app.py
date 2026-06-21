@@ -8,7 +8,9 @@ from neutron_diffusion.geometry import (
 )
 from neutron_diffusion.materials import (
     PRESET_MATERIALS_1G, PRESET_MATERIALS_2G,
-    Material1G, Material2G, get_preset_1g, get_preset_2g
+    Material1G, Material2G, get_preset_1g, get_preset_2g,
+    get_all_material_names_1g, get_all_material_names_2g,
+    register_custom_1g, register_custom_2g, clear_custom_materials
 )
 from neutron_diffusion.eigenvalue import (
     criticality_1d_1g, criticality_2d_1g,
@@ -51,8 +53,62 @@ page = st.sidebar.radio(
     ]
 )
 
-MATERIAL_OPTIONS = list(PRESET_MATERIALS_1G.keys())
 BOUNDARY_OPTIONS = ["vacuum", "reflective", "zero_flux"]
+
+with st.sidebar.expander("🧪 自定义材料参数", expanded=False):
+    st.markdown("#### 单群自定义材料")
+    n_custom_1g = st.number_input("单群自定义材料数量", 0, 10, 0, 1, key="n_custom_1g")
+    for ci in range(n_custom_1g):
+        st.markdown(f"**自定义材料 1G-{ci+1}**")
+        cname = st.text_input(f"名称", f"自定义{ci+1}", key=f"cname_1g_{ci}")
+        cc1, cc2, cc3 = st.columns(3)
+        with cc1:
+            cSigma_a = st.number_input("Σ_a (cm⁻¹)", 0.0, 10.0, 0.1, 0.001, key=f"cSa_1g_{ci}", format="%.4f")
+            cSigma_f = st.number_input("Σ_f (cm⁻¹)", 0.0, 10.0, 0.05, 0.001, key=f"cSf_1g_{ci}", format="%.4f")
+        with cc2:
+            cnu = st.number_input("ν", 0.0, 5.0, 2.42, 0.01, key=f"cnu_1g_{ci}", format="%.3f")
+            cD = st.number_input("D (cm)", 0.001, 100.0, 1.2, 0.01, key=f"cD_1g_{ci}", format="%.3f")
+        with cc3:
+            cSigma_s = st.number_input("Σ_s (cm⁻¹)", 0.0, 10.0, 0.4, 0.01, key=f"cSs_1g_{ci}", format="%.4f")
+        custom_mat_1g = Material1G(
+            name=cname, Sigma_a=cSigma_a, Sigma_f=cSigma_f,
+            nu=cnu, D=cD, Sigma_s=cSigma_s
+        )
+        register_custom_1g(cname, custom_mat_1g)
+
+    st.divider()
+    st.markdown("#### 两群自定义材料")
+    n_custom_2g = st.number_input("两群自定义材料数量", 0, 10, 0, 1, key="n_custom_2g")
+    for ci in range(n_custom_2g):
+        st.markdown(f"**自定义材料 2G-{ci+1}**")
+        cname2 = st.text_input(f"名称", f"自定义{ci+1}", key=f"cname_2g_{ci}")
+        st.markdown("**快群 (群1)**")
+        cc1a, cc1b = st.columns(2)
+        with cc1a:
+            cD1 = st.number_input("D₁ (cm)", 0.001, 100.0, 1.5, 0.01, key=f"cD1_2g_{ci}", format="%.3f")
+            cSigma_a1 = st.number_input("Σ_a₁ (cm⁻¹)", 0.0, 10.0, 0.01, 0.001, key=f"cSa1_2g_{ci}", format="%.4f")
+        with cc1b:
+            cSigma_f1 = st.number_input("Σ_f₁ (cm⁻¹)", 0.0, 10.0, 0.005, 0.001, key=f"cSf1_2g_{ci}", format="%.4f")
+            cnu1 = st.number_input("ν₁", 0.0, 5.0, 2.42, 0.01, key=f"cnu1_2g_{ci}", format="%.3f")
+        st.markdown("**热群 (群2)**")
+        cc2a, cc2b, cc2c = st.columns(3)
+        with cc2a:
+            cD2 = st.number_input("D₂ (cm)", 0.001, 100.0, 0.8, 0.01, key=f"cD2_2g_{ci}", format="%.3f")
+            cSigma_a2 = st.number_input("Σ_a₂ (cm⁻¹)", 0.0, 10.0, 0.12, 0.001, key=f"cSa2_2g_{ci}", format="%.4f")
+        with cc2b:
+            cSigma_f2 = st.number_input("Σ_f₂ (cm⁻¹)", 0.0, 10.0, 0.08, 0.001, key=f"cSf2_2g_{ci}", format="%.4f")
+            cnu2 = st.number_input("ν₂", 0.0, 5.0, 2.42, 0.01, key=f"cnu2_2g_{ci}", format="%.3f")
+        with cc2c:
+            cSigma_s12 = st.number_input("Σ_s₁₂ (cm⁻¹)", 0.0, 10.0, 0.08, 0.001, key=f"cSs12_2g_{ci}", format="%.4f")
+        custom_mat_2g = Material2G(
+            name=cname2, D1=cD1, Sigma_a1=cSigma_a1, Sigma_f1=cSigma_f1, nu1=cnu1,
+            D2=cD2, Sigma_a2=cSigma_a2, Sigma_f2=cSigma_f2, nu2=cnu2,
+            Sigma_s12=cSigma_s12
+        )
+        register_custom_2g(cname2, custom_mat_2g)
+
+MATERIAL_OPTIONS = get_all_material_names_1g()
+MATERIAL_OPTIONS_2G = get_all_material_names_2g()
 
 
 def display_result_summary(result: EigenvalueResult):
@@ -156,6 +212,11 @@ if page == "一维反应堆临界计算":
                 Sigma_f2 = np.array([m.Sigma_f2 for m in materials])
                 power = Sigma_f1 * result.phi1 + Sigma_f2 * result.phi2
             power = power / np.mean(power) if np.mean(power) > 0 else power
+            peak_factor = np.max(power) / np.mean(power) if np.mean(power) > 0 else 1.0
+            pcol1, pcol2, pcol3 = st.columns(3)
+            pcol1.metric("功率峰因子", f"{peak_factor:.4f}")
+            pcol2.metric("最大功率", f"{np.max(power):.4f}")
+            pcol3.metric("平均功率", f"{np.mean(power):.4f}")
             fig_p = plot_power_distribution_1d(x_centers, power)
             st.pyplot(fig_p)
 
@@ -190,7 +251,7 @@ elif page == "二维反应堆临界计算":
         bc_top_2d = st.selectbox("上边界", BOUNDARY_OPTIONS, index=0, key="bc_t2d")
 
         st.subheader("SOR求解器")
-        omega = st.slider("超松弛因子 ω", 1.0, 1.9, 1.5, 0.05)
+        omega = st.slider("超松弛因子 ω (1.0=稳定Gauss-Seidel)", 1.0, 1.5, 1.0, 0.05)
         inner_tol = st.number_input("内迭代收敛阈值", 1e-8, 1e-3, 1e-6, format="%.1e", key="it2d")
         inner_max_iter = st.number_input("最大内迭代次数", 100, 10000, 2000, 100, key="imi2d")
 
@@ -341,6 +402,11 @@ elif page == "二维反应堆临界计算":
                 Sigma_f2 = np.array([[m.Sigma_f2 for m in row] for row in materials_2d])
                 power = Sigma_f1 * result.phi1 + Sigma_f2 * result.phi2
             power = power / np.mean(power) if np.mean(power) > 0 else power
+            peak_factor_2d = np.max(power) / np.mean(power) if np.mean(power) > 0 else 1.0
+            pcol1, pcol2, pcol3 = st.columns(3)
+            pcol1.metric("功率峰因子", f"{peak_factor_2d:.4f}")
+            pcol2.metric("最大功率", f"{np.max(power):.4f}")
+            pcol3.metric("平均功率", f"{np.mean(power):.4f}")
             fig_p = plot_power_distribution_2d(x_centers, y_centers, power)
             st.pyplot(fig_p)
 
@@ -417,7 +483,7 @@ elif page == "控制棒价值计算":
             ngroups_cr2d_key = "1g" if ngroups_cr2d == "单群" else "2g"
             dx_cr2d = st.slider("X方向网格间距 (cm)", 0.5, 10.0, 2.0, 0.5, key="cr2d_dx")
             dy_cr2d = st.slider("Y方向网格间距 (cm)", 0.5, 10.0, 2.0, 0.5, key="cr2d_dy")
-            omega_cr = st.slider("SOR因子 ω", 1.0, 1.9, 1.5, 0.05, key="cr2d_omega")
+            omega_cr = st.slider("SOR因子 ω (1.0=稳定)", 1.0, 1.5, 1.0, 0.05, key="cr2d_omega")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -554,7 +620,7 @@ elif page == "IAEA基准验证":
         st.subheader("⚙️ 计算参数")
         dx_bm = st.slider("X方向网格间距 (cm)", 0.5, 10.0, 5.0, 0.5, key="bm_dx")
         dy_bm = st.slider("Y方向网格间距 (cm)", 0.5, 10.0, 5.0, 0.5, key="bm_dy")
-        omega_bm = st.slider("SOR超松弛因子 ω", 1.0, 1.9, 1.5, 0.05, key="bm_omega")
+        omega_bm = st.slider("SOR超松弛因子 ω (1.0=稳定)", 1.0, 1.5, 1.0, 0.05, key="bm_omega")
         inner_tol_bm = st.number_input("内迭代收敛阈值", 1e-8, 1e-3, 1e-6, format="%.1e", key="bm_it")
         inner_max_bm = st.number_input("最大内迭代", 100, 10000, 2000, 100, key="bm_imi")
         k_tol_bm = st.number_input("keff收敛阈值", 1e-7, 1e-3, 1e-5, format="%.1e", key="bm_kt")
