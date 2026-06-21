@@ -15,7 +15,7 @@ def build_iaea_benchmark_geometry(dx: float = 1.0, dy: float = 1.0) -> Geometry2
     regions.append(Region2D(0.0, 100.0, 0.0, 100.0, "IAEA燃料A"))
     regions.append(Region2D(100.0, 170.0, 0.0, 100.0, "IAEA燃料B"))
     regions.append(Region2D(0.0, 100.0, 100.0, 170.0, "IAEA燃料B"))
-    regions.append(Region2D(100.0, 170.0, 100.0, 170.0, "石墨反射层"))
+    regions.append(Region2D(100.0, 170.0, 100.0, 170.0, "IAEA反射层"))
 
     bc = BoundaryCondition(
         left="reflective",

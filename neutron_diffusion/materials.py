@@ -87,19 +87,19 @@ PRESET_MATERIALS_1G: Dict[str, Material1G] = {
     ),
     "IAEA燃料A": Material1G(
         name="IAEA燃料A",
-        Sigma_a=0.12,
-        Sigma_f=0.079,
+        Sigma_a=0.09015,
+        Sigma_f=0.05556,
         nu=2.43,
-        D=0.72,
-        Sigma_s=0.35
+        D=0.95,
+        Sigma_s=0.02
     ),
     "IAEA燃料B": Material1G(
         name="IAEA燃料B",
-        Sigma_a=0.13,
-        Sigma_f=0.065,
+        Sigma_a=0.09515,
+        Sigma_f=0.05556,
         nu=2.43,
-        D=0.72,
-        Sigma_s=0.35
+        D=0.95,
+        Sigma_s=0.02
     ),
     "轻水慢化剂": Material1G(
         name="轻水慢化剂",
@@ -162,27 +162,39 @@ PRESET_MATERIALS_2G: Dict[str, Material2G] = {
     ),
     "IAEA燃料A": Material2G(
         name="IAEA燃料A",
-        D1=1.360,
-        Sigma_a1=0.0084,
-        Sigma_f1=0.0045,
-        nu1=2.75,
-        D2=0.480,
-        Sigma_a2=0.1200,
-        Sigma_f2=0.0815,
+        D1=1.5,
+        Sigma_a1=0.01012,
+        Sigma_f1=0.0,
+        nu1=0.0,
+        D2=0.4,
+        Sigma_a2=0.080032,
+        Sigma_f2=0.0555556,
         nu2=2.43,
-        Sigma_s12=0.0240
+        Sigma_s12=0.02
     ),
     "IAEA燃料B": Material2G(
         name="IAEA燃料B",
-        D1=1.360,
-        Sigma_a1=0.0084,
-        Sigma_f1=0.0040,
-        nu1=2.75,
-        D2=0.480,
-        Sigma_a2=0.1300,
-        Sigma_f2=0.0650,
+        D1=1.5,
+        Sigma_a1=0.01012,
+        Sigma_f1=0.0,
+        nu1=0.0,
+        D2=0.4,
+        Sigma_a2=0.085032,
+        Sigma_f2=0.0555556,
         nu2=2.43,
-        Sigma_s12=0.0240
+        Sigma_s12=0.02
+    ),
+    "IAEA反射层": Material2G(
+        name="IAEA反射层",
+        D1=2.0,
+        Sigma_a1=0.00016,
+        Sigma_f1=0.0,
+        nu1=0.0,
+        D2=0.3,
+        Sigma_a2=0.010024,
+        Sigma_f2=0.0,
+        nu2=0.0,
+        Sigma_s12=0.04
     ),
     "轻水慢化剂": Material2G(
         name="轻水慢化剂",

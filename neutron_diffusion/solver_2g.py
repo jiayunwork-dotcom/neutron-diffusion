@@ -102,9 +102,8 @@ def solve_2d_diffusion_2g_sor(
     materials = geom.get_materials_2g()
     ny, nx = len(y_centers), len(x_centers)
     dx, dy = geom.dx, geom.dy
-    d_left, d_right, d_bottom, d_top = geom.get_extrapolation_distances_1g()
-    d_left_1, d_right_1, d_bottom_1, d_top_1 = d_left, d_right, d_bottom, d_top
-    d_left_2, d_right_2, d_bottom_2, d_top_2 = d_left, d_right, d_bottom, d_top
+    (d_left_1, d_right_1, d_bottom_1, d_top_1), \
+    (d_left_2, d_right_2, d_bottom_2, d_top_2) = geom.get_extrapolation_distances_2g()
 
     D1 = np.array([[m.D1 for m in row] for row in materials])
     Sigma_a1 = np.array([[m.Sigma_a1 for m in row] for row in materials])
@@ -149,8 +148,7 @@ def solve_2d_diffusion_2g_sor(
         D2_y[0, i] = D2[0, i]
         D2_y[ny, i] = D2[ny - 1, i]
 
-    def update_group(phi, D, Sigma_a, S, extra_source, d_l, d_r, d_b, d_t, D_x, D_y):
-        phi_new_local = phi.copy()
+    def gs_update(phi, D, Sigma_a, S, extra_source, d_l, d_r, d_b, d_t, D_x, D_y):
         for j in range(ny):
             for i in range(nx):
                 diag = Sigma_a[j, i]
@@ -225,9 +223,8 @@ def solve_2d_diffusion_2g_sor(
                         diag += coeff
 
                 updated = val / diag
-                phi_new_local[j, i] = phi[j, i] + omega * (updated - phi[j, i])
-                phi_new_local[j, i] = max(phi_new_local[j, i], 1e-20)
-        return phi_new_local
+                phi[j, i] = phi[j, i] + omega * (updated - phi[j, i])
+                phi[j, i] = max(phi[j, i], 1e-20)
 
     residuals = []
     for iteration in range(max_iter):
@@ -235,12 +232,12 @@ def solve_2d_diffusion_2g_sor(
         phi2_old = phi2.copy()
 
         extra1 = np.zeros((ny, nx))
-        phi1 = update_group(phi1, D1, Sigma_a1 + Sigma_s12, S1, extra1,
-                           d_left_1, d_right_1, d_bottom_1, d_top_1, D1_x, D1_y)
+        gs_update(phi1, D1, Sigma_a1 + Sigma_s12, S1, extra1,
+                  d_left_1, d_right_1, d_bottom_1, d_top_1, D1_x, D1_y)
 
         extra2 = Sigma_s12 * phi1
-        phi2 = update_group(phi2, D2, Sigma_a2, S2, extra2,
-                           d_left_2, d_right_2, d_bottom_2, d_top_2, D2_x, D2_y)
+        gs_update(phi2, D2, Sigma_a2, S2, extra2,
+                  d_left_2, d_right_2, d_bottom_2, d_top_2, D2_x, D2_y)
 
         change1 = np.max(np.abs(phi1 - phi1_old) / np.maximum(np.abs(phi1_old), 1e-20))
         change2 = np.max(np.abs(phi2 - phi2_old) / np.maximum(np.abs(phi2_old), 1e-20))

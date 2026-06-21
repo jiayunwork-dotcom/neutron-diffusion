@@ -71,7 +71,7 @@ def criticality_1d_1g(
 
 def criticality_2d_1g(
     geom: Geometry2D,
-    omega: float = 1.0,
+    omega: float = 1.2,
     inner_tol: float = 1e-6,
     inner_max_iter: int = 2000,
     k_tol: float = 1e-5,
@@ -196,7 +196,7 @@ def criticality_1d_2g(
 
 def criticality_2d_2g(
     geom: Geometry2D,
-    omega: float = 1.0,
+    omega: float = 1.2,
     inner_tol: float = 1e-6,
     inner_max_iter: int = 2000,
     k_tol: float = 1e-5,

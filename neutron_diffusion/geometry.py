@@ -155,3 +155,30 @@ class Geometry2D:
         d_bottom = 0.7104 / materials[0][nx // 2].Sigma_tr if self.bc.bottom == "vacuum" else 0.0
         d_top = 0.7104 / materials[ny - 1][nx // 2].Sigma_tr if self.bc.top == "vacuum" else 0.0
         return d_left, d_right, d_bottom, d_top
+
+    def get_extrapolation_distances_2g(self) -> Tuple[Tuple[float, float, float, float], Tuple[float, float, float, float]]:
+        materials = self.get_materials_2g()
+        ny, nx = len(materials), len(materials[0])
+        if self.bc.left == "vacuum":
+            d_left_1 = 0.7104 / materials[ny // 2][0].Sigma_tr1
+            d_left_2 = 0.7104 / materials[ny // 2][0].Sigma_tr2
+        else:
+            d_left_1, d_left_2 = 0.0, 0.0
+        if self.bc.right == "vacuum":
+            d_right_1 = 0.7104 / materials[ny // 2][nx - 1].Sigma_tr1
+            d_right_2 = 0.7104 / materials[ny // 2][nx - 1].Sigma_tr2
+        else:
+            d_right_1, d_right_2 = 0.0, 0.0
+        if self.bc.bottom == "vacuum":
+            d_bottom_1 = 0.7104 / materials[0][nx // 2].Sigma_tr1
+            d_bottom_2 = 0.7104 / materials[0][nx // 2].Sigma_tr2
+        else:
+            d_bottom_1, d_bottom_2 = 0.0, 0.0
+        if self.bc.top == "vacuum":
+            d_top_1 = 0.7104 / materials[ny - 1][nx // 2].Sigma_tr1
+            d_top_2 = 0.7104 / materials[ny - 1][nx // 2].Sigma_tr2
+        else:
+            d_top_1, d_top_2 = 0.0, 0.0
+        dist1 = (d_left_1, d_right_1, d_bottom_1, d_top_1)
+        dist2 = (d_left_2, d_right_2, d_bottom_2, d_top_2)
+        return dist1, dist2

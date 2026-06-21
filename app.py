@@ -251,7 +251,7 @@ elif page == "二维反应堆临界计算":
         bc_top_2d = st.selectbox("上边界", BOUNDARY_OPTIONS, index=0, key="bc_t2d")
 
         st.subheader("SOR求解器")
-        omega = st.slider("超松弛因子 ω (1.0=稳定Gauss-Seidel)", 1.0, 1.5, 1.0, 0.05)
+        omega = st.slider("超松弛因子 ω (1.0=Gauss-Seidel, 1.2~1.4=推荐SOR)", 1.0, 1.6, 1.2, 0.05)
         inner_tol = st.number_input("内迭代收敛阈值", 1e-8, 1e-3, 1e-6, format="%.1e", key="it2d")
         inner_max_iter = st.number_input("最大内迭代次数", 100, 10000, 2000, 100, key="imi2d")
 
@@ -483,7 +483,7 @@ elif page == "控制棒价值计算":
             ngroups_cr2d_key = "1g" if ngroups_cr2d == "单群" else "2g"
             dx_cr2d = st.slider("X方向网格间距 (cm)", 0.5, 10.0, 2.0, 0.5, key="cr2d_dx")
             dy_cr2d = st.slider("Y方向网格间距 (cm)", 0.5, 10.0, 2.0, 0.5, key="cr2d_dy")
-            omega_cr = st.slider("SOR因子 ω (1.0=稳定)", 1.0, 1.5, 1.0, 0.05, key="cr2d_omega")
+            omega_cr = st.slider("SOR因子 ω (1.0=Gauss-Seidel, 1.2~1.4=SOR)", 1.0, 1.6, 1.2, 0.05, key="cr2d_omega")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -620,7 +620,7 @@ elif page == "IAEA基准验证":
         st.subheader("⚙️ 计算参数")
         dx_bm = st.slider("X方向网格间距 (cm)", 0.5, 10.0, 5.0, 0.5, key="bm_dx")
         dy_bm = st.slider("Y方向网格间距 (cm)", 0.5, 10.0, 5.0, 0.5, key="bm_dy")
-        omega_bm = st.slider("SOR超松弛因子 ω (1.0=稳定)", 1.0, 1.5, 1.0, 0.05, key="bm_omega")
+        omega_bm = st.slider("SOR超松弛因子 ω (1.0=Gauss-Seidel, 1.2~1.4=SOR)", 1.0, 1.6, 1.2, 0.05, key="bm_omega")
         inner_tol_bm = st.number_input("内迭代收敛阈值", 1e-8, 1e-3, 1e-6, format="%.1e", key="bm_it")
         inner_max_bm = st.number_input("最大内迭代", 100, 10000, 2000, 100, key="bm_imi")
         k_tol_bm = st.number_input("keff收敛阈值", 1e-7, 1e-3, 1e-5, format="%.1e", key="bm_kt")

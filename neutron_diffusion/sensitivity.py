@@ -79,29 +79,36 @@ def find_critical_size_1d(
     keffs = []
     computed = {}
 
+    def snap_to_grid(s: float) -> float:
+        n_cells = max(1, int(round(s / dx)))
+        return n_cells * dx
+
     def eval_size(s: float) -> float:
-        key = round(s / max(dx * 0.01, 1e-6))
+        s_grid = snap_to_grid(s)
+        key = round(s_grid / max(dx * 0.5, 1e-6))
         if key in computed:
             return computed[key]
-        k = _compute_keff_for_size(s, reflector_thickness, fuel_material,
+        k = _compute_keff_for_size(s_grid, reflector_thickness, fuel_material,
                                    reflector_material, dx, ngroups)
         computed[key] = k
-        sizes.append(s)
+        sizes.append(s_grid)
         keffs.append(k)
         return k
 
-    a, b = size_min, size_max
+    a, b = snap_to_grid(size_min), snap_to_grid(size_max)
+    if a == b:
+        b = a + dx
 
     if auto_expand_range:
         keff_a = eval_size(a)
-        while keff_a > 1.0 and a > dx:
-            a = max(dx, a / 2.0)
+        while keff_a > 1.0 and a > dx * 1.5:
+            a = snap_to_grid(max(dx, a / 2.0))
             keff_a = eval_size(a)
 
         keff_b = eval_size(b)
         expand_count = 0
         while keff_b < 1.0 and expand_count < 20:
-            b = b * 1.5
+            b = snap_to_grid(b * 1.5)
             keff_b = eval_size(b)
             expand_count += 1
 
@@ -115,8 +122,11 @@ def find_critical_size_1d(
 
     critical_size = (a + b) / 2.0
     iter_count = 0
-    while iter_count < max_iter and (b - a) > dx * 0.1:
-        mid = (a + b) / 2.0
+    while iter_count < max_iter and (b - a) > dx * 0.5:
+        mid_raw = (a + b) / 2.0
+        mid = snap_to_grid(mid_raw)
+        if mid == a or mid == b:
+            break
         keff_mid = eval_size(mid)
         critical_size = mid
         if abs(keff_mid - 1.0) < tol:
@@ -128,4 +138,8 @@ def find_critical_size_1d(
             b = mid
             keff_b = keff_mid
         iter_count += 1
-    return critical_size, sizes, keffs
+
+    if abs(keff_a - 1.0) < abs(keff_b - 1.0):
+        return a, sizes, keffs
+    else:
+        return b, sizes, keffs
