@@ -1093,25 +1093,31 @@ elif page == "蒙特卡洛模拟":
                 det_result = st.session_state["det_result_mc"]
                 x_nodes, x_centers, _ = geom_mc.build_mesh()
 
-                from scipy.interpolate import interp1d
+                try:
+                    det_at_mc = np.interp(
+                        mc_result.flux_centers,
+                        x_centers,
+                        det_result.phi,
+                        left=0.0,
+                        right=0.0
+                    )
 
-                det_interp = interp1d(x_centers, det_result.phi, kind='linear',
-                                     bounds_error=False, fill_value=0.0)
-                det_at_mc = det_interp(mc_result.flux_centers)
+                    rel_error = compute_flux_relative_error(mc_result.flux_mc, det_at_mc)
 
-                rel_error = compute_flux_relative_error(mc_result.flux_mc, det_at_mc)
+                    fig_err = plot_relative_error(
+                        mc_result.flux_centers,
+                        rel_error,
+                        title="通量相对误差分布 (蒙特卡洛 vs 扩散方程)"
+                    )
+                    st.pyplot(fig_err)
 
-                fig_err = plot_relative_error(
-                    mc_result.flux_centers,
-                    rel_error,
-                    title="通量相对误差分布 (蒙特卡洛 vs 扩散方程)"
-                )
-                st.pyplot(fig_err)
-
-                err_col1, err_col2, err_col3 = st.columns(3)
-                err_col1.metric("平均相对误差", f"{np.mean(rel_error):.2f}%")
-                err_col2.metric("最大相对误差", f"{np.max(rel_error):.2f}%")
-                err_col3.metric("中位相对误差", f"{np.median(rel_error):.2f}%")
+                    err_col1, err_col2, err_col3 = st.columns(3)
+                    err_col1.metric("平均相对误差", f"{np.mean(rel_error):.2f}%")
+                    err_col2.metric("最大相对误差", f"{np.max(rel_error):.2f}%")
+                    err_col3.metric("中位相对误差", f"{np.median(rel_error):.2f}%")
+                except Exception as e:
+                    st.error(f"绘制相对误差图时出错: {str(e)}")
+                    st.info("请确保扩散方程已成功运行并产生有效结果")
             else:
                 st.info("请勾选'同时运行确定性扩散方程对比'以查看相对误差")
 

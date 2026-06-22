@@ -29,6 +29,7 @@ class MonteCarloResult:
     flux_bins: np.ndarray = field(default_factory=lambda: np.array([]))
     flux_centers: np.ndarray = field(default_factory=lambda: np.array([]))
     flux_mc: np.ndarray = field(default_factory=lambda: np.array([]))
+    track_length: np.ndarray = field(default_factory=lambda: np.array([]))
     collision_count: np.ndarray = field(default_factory=lambda: np.array([]))
     n_generations: int = 0
     n_discard: int = 0
@@ -49,30 +50,44 @@ class MonteCarloResult:
         return 0.0
 
 
+def _get_region_idx_at_x(geom: Geometry1D, x: float) -> int:
+    for i, region in enumerate(geom.regions):
+        if i == len(geom.regions) - 1:
+            if region.x_start - 1e-12 <= x <= region.x_end + 1e-12:
+                return i
+        else:
+            if region.x_start - 1e-12 <= x < region.x_end - 1e-12:
+                return i
+    return -1
+
+
 def _get_material_at_x(geom: Geometry1D, x: float) -> Optional[Material1G]:
-    for region in geom.regions:
-        if region.x_start <= x <= region.x_end:
-            return get_preset_1g(region.material_name)
+    idx = _get_region_idx_at_x(geom, x)
+    if idx >= 0:
+        return get_preset_1g(geom.regions[idx].material_name)
     return None
 
 
 def _find_next_boundary(geom: Geometry1D, x: float, direction: int) -> float:
-    if direction > 0:
-        for region in geom.regions:
-            if region.x_end > x:
-                return region.x_end
+    idx = _get_region_idx_at_x(geom, x)
+    if idx < 0:
+        if x < geom.x_min:
+            return geom.x_min
         return geom.x_max
+
+    if direction > 0:
+        return geom.regions[idx].x_end
     else:
-        for region in reversed(geom.regions):
-            if region.x_start < x:
-                return region.x_start
-        return geom.x_min
+        return geom.regions[idx].x_start
 
 
 def _sample_free_path(Sigma_t: float, rng: np.random.Generator) -> float:
     if Sigma_t <= 0:
         return 1e10
-    return -np.log(rng.random()) / Sigma_t
+    xi = rng.random()
+    while xi <= 0.0:
+        xi = rng.random()
+    return -np.log(xi) / Sigma_t
 
 
 def _sample_reaction_type(
@@ -110,19 +125,60 @@ def _sample_fission_neutrons(nu: float, rng: np.random.Generator) -> int:
     return n_integer
 
 
+def _accumulate_track_length(
+    x_start: float,
+    x_end: float,
+    bin_edges: np.ndarray,
+    track_lengths: np.ndarray,
+    weight: float = 1.0,
+) -> None:
+    if x_start == x_end:
+        return
+
+    if x_start > x_end:
+        x_start, x_end = x_end, x_start
+
+    x_min_bin = bin_edges[0]
+    x_max_bin = bin_edges[-1]
+
+    x_start_clamped = max(x_start, x_min_bin)
+    x_end_clamped = min(x_end, x_max_bin)
+
+    if x_start_clamped >= x_end_clamped:
+        return
+
+    idx_start = np.searchsorted(bin_edges, x_start_clamped, side="right") - 1
+    idx_end = np.searchsorted(bin_edges, x_end_clamped, side="right") - 1
+
+    idx_start = max(0, min(idx_start, len(track_lengths) - 1))
+    idx_end = max(0, min(idx_end, len(track_lengths) - 1))
+
+    if idx_start == idx_end:
+        track_lengths[idx_start] += (x_end_clamped - x_start_clamped) * weight
+    else:
+        track_lengths[idx_start] += (bin_edges[idx_start + 1] - x_start_clamped) * weight
+        for i in range(idx_start + 1, idx_end):
+            track_lengths[i] += (bin_edges[i + 1] - bin_edges[i]) * weight
+        track_lengths[idx_end] += (x_end_clamped - bin_edges[idx_end]) * weight
+
+
 def _track_neutron(
     neutron: Neutron,
     geom: Geometry1D,
     rng: np.random.Generator,
+    bin_edges: Optional[np.ndarray] = None,
+    track_lengths: Optional[np.ndarray] = None,
     track_collisions: bool = True,
 ) -> Tuple[List[MCReaction], List[float], str]:
     collisions: List[MCReaction] = []
     fission_sites: List[float] = []
-    max_collisions = 1000
+    max_collisions = 10000
     n_collisions = 0
     end_reason = "absorption"
 
     while neutron.alive and n_collisions < max_collisions:
+        x_before = neutron.x
+
         mat = _get_material_at_x(geom, neutron.x)
         if mat is None:
             neutron.alive = False
@@ -137,6 +193,10 @@ def _track_neutron(
 
         if path_length < dist_to_boundary:
             new_x = neutron.x + neutron.direction * path_length
+
+            if bin_edges is not None and track_lengths is not None:
+                _accumulate_track_length(neutron.x, new_x, bin_edges, track_lengths, neutron.weight)
+
             neutron.x = new_x
             n_collisions += 1
 
@@ -158,17 +218,43 @@ def _track_neutron(
                     for _ in range(n_new):
                         fission_sites.append(neutron.x)
         else:
-            neutron.x = next_boundary
+            new_x = next_boundary
 
-            if neutron.x <= geom.x_min or neutron.x >= geom.x_max:
-                neutron.alive = False
-                end_reason = "leakage"
-                break
+            if bin_edges is not None and track_lengths is not None:
+                _accumulate_track_length(neutron.x, new_x, bin_edges, track_lengths, neutron.weight)
 
-            if neutron.direction > 0:
-                neutron.x = next_boundary + 1e-10
+            neutron.x = new_x
+
+            if neutron.x <= geom.x_min + 1e-12:
+                if geom.bc.left == "reflective":
+                    neutron.x = geom.x_min
+                    neutron.direction = 1
+                elif geom.bc.left == "zero_flux" or geom.bc.left == "vacuum":
+                    neutron.alive = False
+                    end_reason = "leakage"
+                    break
+                else:
+                    neutron.alive = False
+                    end_reason = "leakage"
+                    break
+            elif neutron.x >= geom.x_max - 1e-12:
+                if geom.bc.right == "reflective":
+                    neutron.x = geom.x_max
+                    neutron.direction = -1
+                elif geom.bc.right == "zero_flux" or geom.bc.right == "vacuum":
+                    neutron.alive = False
+                    end_reason = "leakage"
+                    break
+                else:
+                    neutron.alive = False
+                    end_reason = "leakage"
+                    break
             else:
-                neutron.x = next_boundary - 1e-10
+                eps = 1e-10 * (geom.x_max - geom.x_min)
+                if neutron.direction > 0:
+                    neutron.x = next_boundary + eps
+                else:
+                    neutron.x = next_boundary - eps
 
     return collisions, fission_sites, end_reason
 
@@ -218,7 +304,7 @@ def _setup_flux_bins(geom: Geometry1D, n_bins: int) -> Tuple[np.ndarray, np.ndar
     return bin_edges, bin_centers
 
 
-def _accumulate_flux(
+def _accumulate_flux_collisions(
     collisions: List[MCReaction],
     bin_edges: np.ndarray,
     collision_counts: np.ndarray,
@@ -228,6 +314,20 @@ def _accumulate_flux(
         if 0 <= idx < len(collision_counts):
             collision_counts[idx] += col.weight
     return collision_counts
+
+
+def _get_bin_Sigma_t(
+    geom: Geometry1D,
+    bin_centers: np.ndarray,
+) -> np.ndarray:
+    Sigma_t_bins = np.zeros_like(bin_centers)
+    for i, xc in enumerate(bin_centers):
+        mat = _get_material_at_x(geom, xc)
+        if mat is not None:
+            Sigma_t_bins[i] = mat.Sigma_a + mat.Sigma_s
+        else:
+            Sigma_t_bins[i] = 1e-10
+    return Sigma_t_bins
 
 
 def run_monte_carlo_1d(
@@ -252,7 +352,9 @@ def run_monte_carlo_1d(
     )
 
     bin_edges, bin_centers = _setup_flux_bins(geom, n_flux_bins)
+    track_lengths = np.zeros(n_flux_bins, dtype=np.float64)
     collision_counts = np.zeros(n_flux_bins, dtype=np.float64)
+    Sigma_t_bins = _get_bin_Sigma_t(geom, bin_centers)
     result.flux_bins = bin_edges
     result.flux_centers = bin_centers
 
@@ -267,23 +369,30 @@ def run_monte_carlo_1d(
         gen_fission_sites: List[float] = []
         gen_collisions: List[MCReaction] = []
 
+        gen_track_lengths = np.zeros(n_flux_bins, dtype=np.float64) if gen >= n_discard else None
+
         for neutron in neutrons:
             if not neutron.alive:
                 continue
 
-            collisions, fission_sites, _ = _track_neutron(neutron, geom, rng)
+            collisions, fission_sites, _ = _track_neutron(
+                neutron, geom, rng,
+                bin_edges=bin_edges if gen >= n_discard else None,
+                track_lengths=gen_track_lengths,
+            )
             gen_collisions.extend(collisions)
             gen_fission_sites.extend(fission_sites)
 
             total_collisions += len(collisions)
             total_neutrons_tracked += 1
 
+        if gen >= n_discard and gen_track_lengths is not None:
+            track_lengths += gen_track_lengths
+            collision_counts = _accumulate_flux_collisions(gen_collisions, bin_edges, collision_counts)
+            all_fission_sites.extend(gen_fission_sites)
+
         keff_gen = len(gen_fission_sites) / n_neutrons_per_gen if n_neutrons_per_gen > 0 else 0.0
         keff_per_gen.append(keff_gen)
-
-        if gen >= n_discard:
-            collision_counts = _accumulate_flux(gen_collisions, bin_edges, collision_counts)
-            all_fission_sites.extend(gen_fission_sites)
 
         if progress_callback is not None:
             progress_callback(gen + 1, n_generations, keff_gen)
@@ -299,6 +408,7 @@ def run_monte_carlo_1d(
     result.total_neutrons_tracked = total_neutrons_tracked
     result.fission_sites = all_fission_sites
     result.collision_count = collision_counts
+    result.track_length = track_lengths
 
     if result.effective_generations > 0:
         effective_keffs = keff_per_gen[n_discard:]
@@ -307,10 +417,10 @@ def run_monte_carlo_1d(
         ci = 1.96 * result.keff_std
         result.keff_ci_95 = (result.keff_mean - ci, result.keff_mean + ci)
 
-    total_weight = np.sum(collision_counts)
-    if total_weight > 0:
+    total_track_length = np.sum(track_lengths)
+    if total_track_length > 0:
         bin_widths = bin_edges[1:] - bin_edges[:-1]
-        result.flux_mc = collision_counts / (total_weight * bin_widths)
+        result.flux_mc = track_lengths / (total_track_length * bin_widths)
         max_flux = np.max(result.flux_mc)
         if max_flux > 0:
             result.flux_mc = result.flux_mc / max_flux
