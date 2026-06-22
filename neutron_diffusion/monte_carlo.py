@@ -37,6 +37,7 @@ class MonteCarloResult:
     total_neutrons_tracked: int = 0
     total_collisions: int = 0
     fission_sites: List[float] = field(default_factory=list)
+    per_gen_fission_sites: List[List[float]] = field(default_factory=list)
     seed: Optional[int] = None
 
     @property
@@ -360,6 +361,7 @@ def run_monte_carlo_1d(
 
     keff_per_gen: List[float] = []
     all_fission_sites: List[float] = []
+    per_gen_fission_list: List[List[float]] = []
     total_collisions = 0
     total_neutrons_tracked = 0
 
@@ -393,6 +395,7 @@ def run_monte_carlo_1d(
 
         keff_gen = len(gen_fission_sites) / n_neutrons_per_gen if n_neutrons_per_gen > 0 else 0.0
         keff_per_gen.append(keff_gen)
+        per_gen_fission_list.append(gen_fission_sites.copy())
 
         if progress_callback is not None:
             progress_callback(gen + 1, n_generations, keff_gen)
@@ -407,6 +410,7 @@ def run_monte_carlo_1d(
     result.total_collisions = total_collisions
     result.total_neutrons_tracked = total_neutrons_tracked
     result.fission_sites = all_fission_sites
+    result.per_gen_fission_sites = per_gen_fission_list
     result.collision_count = collision_counts
     result.track_length = track_lengths
 
@@ -454,3 +458,164 @@ def moving_average(data: List[float], window: int = 5) -> np.ndarray:
         return np.array(data, dtype=np.float64)
     kernel = np.ones(window) / window
     return np.convolve(data, kernel, mode="same")
+
+
+def compute_autocorrelation_time(
+    keff_history: List[float],
+    n_discard: int = 0,
+    n_batches: int = 20,
+) -> Tuple[float, float]:
+    effective_keffs = np.array(keff_history[n_discard:])
+    n_eff = len(effective_keffs)
+    if n_eff < n_batches * 2:
+        n_batches = max(2, n_eff // 5)
+    
+    batch_size = n_eff // n_batches
+    batch_means = []
+    for i in range(n_batches):
+        start = i * batch_size
+        end = start + batch_size
+        batch_means.append(np.mean(effective_keffs[start:end]))
+    
+    batch_means = np.array(batch_means)
+    var_total = np.var(effective_keffs, ddof=1)
+    var_batches = np.var(batch_means, ddof=1) * batch_size
+    
+    if var_total > 0:
+        autocorr_time = 0.5 * (var_batches / var_total - 1)
+    else:
+        autocorr_time = 0.0
+    
+    autocorr_time = max(0.0, autocorr_time)
+    n_independent = n_eff / (1.0 + 2.0 * autocorr_time)
+    
+    return autocorr_time, n_independent
+
+
+def compute_shannon_entropy_series(
+    per_gen_fission_sites: List[List[float]],
+    x_min: float,
+    x_max: float,
+    n_bins: int = 20,
+) -> np.ndarray:
+    n_gens = len(per_gen_fission_sites)
+    entropy_series = np.zeros(n_gens)
+    bin_edges = np.linspace(x_min, x_max, n_bins + 1)
+    
+    for gen_idx in range(n_gens):
+        sites = np.array(per_gen_fission_sites[gen_idx])
+        if len(sites) == 0:
+            entropy_series[gen_idx] = 0.0
+            continue
+        
+        counts, _ = np.histogram(sites, bins=bin_edges)
+        total = np.sum(counts)
+        if total == 0:
+            entropy_series[gen_idx] = 0.0
+            continue
+        
+        probs = counts / total
+        probs = probs[probs > 0]
+        entropy = -np.sum(probs * np.log(probs))
+        entropy_series[gen_idx] = entropy
+    
+    return entropy_series
+
+
+def find_material_interfaces(geom: Geometry1D) -> List[Tuple[float, str, str]]:
+    interfaces = []
+    for i in range(len(geom.regions) - 1):
+        x_interface = geom.regions[i].x_end
+        mat_left = geom.regions[i].material_name
+        mat_right = geom.regions[i + 1].material_name
+        interfaces.append((x_interface, mat_left, mat_right))
+    return interfaces
+
+
+def compute_boundary_effects(
+    x_centers: np.ndarray,
+    rel_error: np.ndarray,
+    interfaces: List[Tuple[float, str, str]],
+    n_bins_each_side: int = 3,
+) -> List[dict]:
+    boundary_stats = []
+    
+    for x_interface, mat_left, mat_right in interfaces:
+        distances = np.abs(x_centers - x_interface)
+        sorted_indices = np.argsort(distances)
+        
+        left_indices = []
+        right_indices = []
+        for idx in sorted_indices:
+            if x_centers[idx] < x_interface and len(left_indices) < n_bins_each_side:
+                left_indices.append(idx)
+            elif x_centers[idx] > x_interface and len(right_indices) < n_bins_each_side:
+                right_indices.append(idx)
+            if len(left_indices) >= n_bins_each_side and len(right_indices) >= n_bins_each_side:
+                break
+        
+        left_errors = rel_error[left_indices] if left_indices else np.array([0.0])
+        right_errors = rel_error[right_indices] if right_indices else np.array([0.0])
+        
+        left_mean = float(np.mean(left_errors))
+        right_mean = float(np.mean(right_errors))
+        left_std = float(np.std(left_errors))
+        right_std = float(np.std(right_errors))
+        jump = abs(right_mean - left_mean)
+        
+        boundary_stats.append({
+            "position": x_interface,
+            "material_left": mat_left,
+            "material_right": mat_right,
+            "left_mean": left_mean,
+            "right_mean": right_mean,
+            "left_std": left_std,
+            "right_std": right_std,
+            "jump": jump,
+        })
+    
+    return boundary_stats
+
+
+def compute_zonal_errors(
+    x_centers: np.ndarray,
+    rel_error: np.ndarray,
+    geom: Geometry1D,
+) -> Tuple[List[dict], np.ndarray, List[str]]:
+    n_bins = len(x_centers)
+    material_names = []
+    for xc in x_centers:
+        mat_name = geom._find_material(xc)
+        material_names.append(mat_name)
+    
+    zone_info = []
+    current_mat = material_names[0]
+    zone_start_idx = 0
+    
+    for i in range(1, n_bins):
+        if material_names[i] != current_mat:
+            zone_errors = rel_error[zone_start_idx:i]
+            zone_info.append({
+                "material": current_mat,
+                "start_idx": zone_start_idx,
+                "end_idx": i - 1,
+                "x_start": x_centers[zone_start_idx],
+                "x_end": x_centers[i - 1],
+                "mean_error": float(np.mean(zone_errors)),
+                "max_error": float(np.max(zone_errors)),
+            })
+            current_mat = material_names[i]
+            zone_start_idx = i
+    
+    zone_errors = rel_error[zone_start_idx:]
+    zone_info.append({
+        "material": current_mat,
+        "start_idx": zone_start_idx,
+        "end_idx": n_bins - 1,
+        "x_start": x_centers[zone_start_idx],
+        "x_end": x_centers[-1],
+        "mean_error": float(np.mean(zone_errors)),
+        "max_error": float(np.max(zone_errors)),
+    })
+    
+    return zone_info, rel_error, material_names

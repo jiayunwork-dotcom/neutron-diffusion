@@ -402,3 +402,131 @@ def plot_collision_histogram(
     ax.grid(True, alpha=0.3, axis="y")
     fig.tight_layout()
     return fig
+
+
+def plot_zonal_error_heatmap(
+    x_centers: np.ndarray,
+    rel_error: np.ndarray,
+    material_names: List[str],
+    title: str = "分区域误差热力图",
+) -> Figure:
+    from matplotlib.colors import LinearSegmentedColormap
+    
+    fig, ax = plt.subplots(figsize=(14, 4))
+    
+    error_data = rel_error.reshape(1, -1)
+    
+    colors = [(0, 0.8, 0), (1, 1, 0), (1, 0, 0)]
+    cmap = LinearSegmentedColormap.from_list("error_green_yellow_red", colors, N=256)
+    bounds = [0, 5, 20, 100]
+    norm = plt.Normalize(vmin=0, vmax=30)
+    
+    im = ax.imshow(error_data, aspect="auto", cmap=cmap, norm=norm,
+                   extent=[x_centers[0], x_centers[-1], 0, 1])
+    
+    cbar = fig.colorbar(im, ax=ax, ticks=[0, 5, 10, 15, 20, 25, 30])
+    cbar.set_label("相对误差 (%)", fontsize=11)
+    cbar.ax.set_yticklabels(["0%", "5%", "10%", "15%", "20%", "25%", ">30%"])
+    
+    step = max(1, len(x_centers) // 15)
+    for i in range(0, len(x_centers), step):
+        ax.text(x_centers[i], 0.5, f"{rel_error[i]:.1f}%",
+                ha="center", va="center", fontsize=8,
+                color="white" if rel_error[i] > 15 else "black",
+                fontweight="bold")
+    
+    unique_materials = []
+    mat_positions = []
+    current_mat = material_names[0]
+    start_x = x_centers[0]
+    
+    for i in range(1, len(material_names)):
+        if material_names[i] != current_mat:
+            unique_materials.append(current_mat)
+            mat_positions.append((start_x + x_centers[i-1]) / 2)
+            current_mat = material_names[i]
+            start_x = x_centers[i]
+    
+    unique_materials.append(current_mat)
+    mat_positions.append((start_x + x_centers[-1]) / 2)
+    
+    ax.set_yticks([])
+    ax.set_xlabel("x (cm)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    
+    for i, (mat, pos) in enumerate(zip(unique_materials, mat_positions)):
+        ax.text(pos, -0.15, mat, ha="center", va="top",
+                transform=ax.get_xaxis_transform(),
+                fontsize=10, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+    
+    for i in range(1, len(material_names)):
+        if material_names[i] != material_names[i-1]:
+            boundary_x = (x_centers[i-1] + x_centers[i]) / 2
+            ax.axvline(x=boundary_x, color="k", linestyle="--", linewidth=1.5, alpha=0.7)
+    
+    ax.set_ylim(-0.3, 1)
+    fig.tight_layout()
+    return fig
+
+
+def plot_boundary_effects(
+    x_centers: np.ndarray,
+    rel_error: np.ndarray,
+    interfaces: List[Tuple[float, str, str]],
+    title: str = "边界效应量化分析",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.plot(x_centers, rel_error, "b-", linewidth=2, label="局部偏差")
+    ax.fill_between(x_centers, rel_error, alpha=0.3, color="skyblue")
+    
+    for x_interface, mat_left, mat_right in interfaces:
+        ax.axvline(x=x_interface, color="red", linestyle="--", linewidth=2, alpha=0.8)
+        ax.text(x_interface, ax.get_ylim()[1] * 0.95, f"{mat_left}→{mat_right}",
+                rotation=90, va="top", ha="right",
+                fontsize=9, color="darkred", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.9))
+    
+    ax.set_xlabel("x (cm)", fontsize=12)
+    ax.set_ylabel("相对误差 (%)", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    
+    ax.axhline(y=5, color="green", linestyle=":", linewidth=1.5, alpha=0.7, label="5% 阈值")
+    ax.axhline(y=20, color="orange", linestyle=":", linewidth=1.5, alpha=0.7, label="20% 阈值")
+    
+    ax.legend(fontsize=10, loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def plot_shannon_entropy(
+    entropy_series: np.ndarray,
+    n_discard: int = 0,
+    title: str = "Shannon熵收敛曲线",
+) -> Figure:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    generations = np.arange(1, len(entropy_series) + 1)
+    ax.plot(generations, entropy_series, "b-", linewidth=2, label="Shannon熵")
+    
+    if n_discard > 0 and n_discard < len(entropy_series):
+        ax.axvline(x=n_discard + 0.5, color="k", linestyle="--", alpha=0.7,
+                   label=f"丢弃前 {n_discard} 代")
+        ax.axvspan(0.5, n_discard + 0.5, alpha=0.1, color="gray")
+    
+    if len(entropy_series) > n_discard + 5:
+        window = min(10, len(entropy_series) - n_discard)
+        ma = np.convolve(entropy_series[n_discard:], np.ones(window)/window, mode="same")
+        ax.plot(generations[n_discard:], ma, "r--", linewidth=2,
+                label=f"移动平均 (窗口={window})")
+    
+    ax.set_xlabel("代际", fontsize=12)
+    ax.set_ylabel("Shannon熵", fontsize=12)
+    ax.set_title(title, fontsize=14)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig

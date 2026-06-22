@@ -39,10 +39,14 @@ from neutron_diffusion.visualization import (
     plot_kinetics_power, plot_kinetics_reactivity,
     plot_kinetics_precursors, plot_kinetics_all,
     plot_keff_convergence_mc, plot_flux_comparison,
-    plot_relative_error, plot_collision_histogram
+    plot_relative_error, plot_collision_histogram,
+    plot_zonal_error_heatmap, plot_boundary_effects,
+    plot_shannon_entropy
 )
 from neutron_diffusion.monte_carlo import (
-    run_monte_carlo_1d, compute_flux_relative_error, MonteCarloResult
+    run_monte_carlo_1d, compute_flux_relative_error, MonteCarloResult,
+    compute_autocorrelation_time, compute_shannon_entropy_series,
+    find_material_interfaces, compute_boundary_effects, compute_zonal_errors
 )
 from neutron_diffusion.kinetics import (
     DelayedNeutronParams, KineticsResult,
@@ -1044,11 +1048,12 @@ elif page == "蒙特卡洛模拟":
 
         st.divider()
 
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📈 keff 收敛曲线",
             "📊 通量对比",
             "⚠️ 相对误差",
-            "💥 碰撞分布"
+            "💥 碰撞分布",
+            "🔍 适用性诊断"
         ])
 
         with tab1:
@@ -1128,6 +1133,120 @@ elif page == "蒙特卡洛模拟":
                 title="中子碰撞次数空间分布"
             )
             st.pyplot(fig_col)
+
+        with tab5:
+            has_det = "det_result_mc" in st.session_state
+            
+            if has_det:
+                det_result = st.session_state["det_result_mc"]
+                x_nodes_det, x_centers_det, _ = geom_mc.build_mesh()
+                
+                det_at_mc = np.interp(
+                    mc_result.flux_centers,
+                    x_centers_det,
+                    det_result.phi,
+                    left=0.0,
+                    right=0.0
+                )
+                rel_error = compute_flux_relative_error(mc_result.flux_mc, det_at_mc)
+                
+                st.subheader("📊 方法适用性诊断报告")
+                
+                st.markdown("### 第一部分：分区域误差热力图")
+                zone_info, _, material_names = compute_zonal_errors(
+                    mc_result.flux_centers, rel_error, geom_mc
+                )
+                
+                fig_heatmap = plot_zonal_error_heatmap(
+                    mc_result.flux_centers, rel_error, material_names,
+                    title="蒙特卡洛 vs 扩散方程 分区域相对误差热力图"
+                )
+                st.pyplot(fig_heatmap)
+                
+                st.markdown("**各区域误差统计：**")
+                zone_table_data = []
+                for zi, zone in enumerate(zone_info):
+                    zone_table_data.append({
+                        "区域": f"区域{zi+1}",
+                        "材料": zone["material"],
+                        "空间范围 (cm)": f"{zone['x_start']:.1f} ~ {zone['x_end']:.1f}",
+                        "平均误差 (%)": f"{zone['mean_error']:.2f}",
+                        "最大误差 (%)": f"{zone['max_error']:.2f}",
+                    })
+                st.dataframe(zone_table_data, use_container_width=True, hide_index=True)
+                
+                st.divider()
+                st.markdown("### 第二部分：边界效应量化")
+                
+                interfaces = find_material_interfaces(geom_mc)
+                boundary_stats = compute_boundary_effects(
+                    mc_result.flux_centers, rel_error, interfaces, n_bins_each_side=3
+                )
+                
+                if boundary_stats:
+                    st.markdown("**材料交界面偏差统计表：**")
+                    bd_table_data = []
+                    for bi, bs in enumerate(boundary_stats):
+                        bd_table_data.append({
+                            "交界面": f"界面{bi+1}",
+                            "位置 (cm)": f"{bs['position']:.2f}",
+                            "左侧材料": bs["material_left"],
+                            "右侧材料": bs["material_right"],
+                            "左侧3bin平均偏差 (%)": f"{bs['left_mean']:.2f}",
+                            "右侧3bin平均偏差 (%)": f"{bs['right_mean']:.2f}",
+                            "偏差跳变量 (%)": f"{bs['jump']:.2f}",
+                        })
+                    st.dataframe(bd_table_data, use_container_width=True, hide_index=True)
+                    
+                    fig_boundary = plot_boundary_effects(
+                        mc_result.flux_centers, rel_error, interfaces,
+                        title="局部偏差分布与材料交界面位置"
+                    )
+                    st.pyplot(fig_boundary)
+                else:
+                    st.info("未检测到材料交界面（单一材料区域）")
+                
+                st.divider()
+            else:
+                st.info("💡 勾选'同时运行确定性扩散方程对比'可查看完整的方法适用性诊断（包含分区域误差热力图和边界效应量化）")
+            
+            st.markdown("### 第三部分：统计收敛性评估")
+            
+            autocorr_time, n_independent = compute_autocorrelation_time(
+                mc_result.keff_history, n_discard=mc_result.n_discard
+            )
+            
+            conv_col1, conv_col2, conv_col3 = st.columns(3)
+            conv_col1.metric("自相关时间 (代)", f"{autocorr_time:.2f}")
+            conv_col2.metric("有效独立样本数", f"{n_independent:.1f}")
+            conv_col3.metric("有效代数", f"{mc_result.effective_generations}")
+            
+            if autocorr_time > 5:
+                st.warning(
+                    "⚠️ **keff序列存在显著自相关（自相关时间 > 5代），建议增加丢弃代数（n_discard）以提高统计可靠性。**"
+                )
+            else:
+                st.success("✅ keff序列自相关性较弱，统计收敛性良好。")
+            
+            if mc_result.per_gen_fission_sites:
+                entropy_series = compute_shannon_entropy_series(
+                    mc_result.per_gen_fission_sites,
+                    x_min=geom_mc.x_min,
+                    x_max=geom_mc.x_max,
+                    n_bins=20
+                )
+                
+                fig_entropy = plot_shannon_entropy(
+                    entropy_series,
+                    n_discard=mc_result.n_discard,
+                    title="裂变源空间Shannon熵收敛曲线"
+                )
+                st.pyplot(fig_entropy)
+                
+                st.caption(
+                    "Shannon熵反映了裂变源空间分布的均匀性。"
+                    "收敛时熵应趋于稳定，表明源分布不再随代际显著变化。"
+                )
 
 st.divider()
 st.caption("核反应堆中子扩散方程数值求解工具 | 基于 Streamlit + NumPy + SciPy + Matplotlib")
