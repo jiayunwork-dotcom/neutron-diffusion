@@ -45,12 +45,20 @@ def solve_1d_diffusion_2g(
 
     if geom.bc.left == "zero_flux":
         b1[0] += D1_interface[0] / (dx ** 2)
+    elif geom.bc.left == "reflective":
+        a1[0] = 0.0
+        b1[0] = Sigma_a1[0] + Sigma_s12[0] + D1_interface[1] / (dx ** 2)
+        c1[0] = -D1_interface[1] / (dx ** 2)
     elif geom.bc.left == "vacuum":
         coeff = 2.0 * D1_interface[0] / (dx * (dx + 2.0 * d_left_1))
         b1[0] += coeff
 
     if geom.bc.right == "zero_flux":
         b1[n - 1] += D1_interface[n] / (dx ** 2)
+    elif geom.bc.right == "reflective":
+        a1[n - 1] = -D1_interface[n - 1] / (dx ** 2)
+        b1[n - 1] = Sigma_a1[n - 1] + Sigma_s12[n - 1] + D1_interface[n - 1] / (dx ** 2)
+        c1[n - 1] = 0.0
     elif geom.bc.right == "vacuum":
         coeff = 2.0 * D1_interface[n] / (dx * (dx + 2.0 * d_right_1))
         b1[n - 1] += coeff
@@ -72,12 +80,20 @@ def solve_1d_diffusion_2g(
 
     if geom.bc.left == "zero_flux":
         b2[0] += D2_interface[0] / (dx ** 2)
+    elif geom.bc.left == "reflective":
+        a2[0] = 0.0
+        b2[0] = Sigma_a2[0] + D2_interface[1] / (dx ** 2)
+        c2[0] = -D2_interface[1] / (dx ** 2)
     elif geom.bc.left == "vacuum":
         coeff = 2.0 * D2_interface[0] / (dx * (dx + 2.0 * d_left_2))
         b2[0] += coeff
 
     if geom.bc.right == "zero_flux":
         b2[n - 1] += D2_interface[n] / (dx ** 2)
+    elif geom.bc.right == "reflective":
+        a2[n - 1] = -D2_interface[n - 1] / (dx ** 2)
+        b2[n - 1] = Sigma_a2[n - 1] + D2_interface[n - 1] / (dx ** 2)
+        c2[n - 1] = 0.0
     elif geom.bc.right == "vacuum":
         coeff = 2.0 * D2_interface[n] / (dx * (dx + 2.0 * d_right_2))
         b2[n - 1] += coeff

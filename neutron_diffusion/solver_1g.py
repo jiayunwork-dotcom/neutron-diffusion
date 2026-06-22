@@ -55,7 +55,9 @@ def solve_1d_diffusion_1g(
     if geom.bc.left == "zero_flux":
         b[0] += D_interface[0] / (dx ** 2)
     elif geom.bc.left == "reflective":
-        pass
+        a[0] = 0.0
+        b[0] = Sigma_a[0] + D_interface[1] / (dx ** 2)
+        c[0] = -D_interface[1] / (dx ** 2)
     elif geom.bc.left == "vacuum":
         d_eff = d_left
         coeff = 2.0 * D_interface[0] / (dx * (dx + 2.0 * d_eff))
@@ -64,7 +66,9 @@ def solve_1d_diffusion_1g(
     if geom.bc.right == "zero_flux":
         b[n - 1] += D_interface[n] / (dx ** 2)
     elif geom.bc.right == "reflective":
-        pass
+        a[n - 1] = -D_interface[n - 1] / (dx ** 2)
+        b[n - 1] = Sigma_a[n - 1] + D_interface[n - 1] / (dx ** 2)
+        c[n - 1] = 0.0
     elif geom.bc.right == "vacuum":
         d_eff = d_right
         coeff = 2.0 * D_interface[n] / (dx * (dx + 2.0 * d_eff))
